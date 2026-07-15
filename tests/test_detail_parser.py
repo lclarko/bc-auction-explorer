@@ -46,6 +46,30 @@ def test_parses_captured_titleless_item_detail() -> None:
     assert len(detail.content_hash) == 64
 
 
+def test_parses_a_high_bid_with_a_trailing_account_label() -> None:
+    html = _detail().replace(
+        "1000.00<img",
+        "1000.00(Sanitized account)<img",
+        1,
+    )
+
+    detail = parse_item_detail(html, _DETAIL_URL)
+
+    assert detail.current_bid == Decimal("1000.00")
+
+
+def test_normalizes_an_amended_detail_auction_number() -> None:
+    html = _detail().replace(
+        '<td class="doc_fieldText">A277437</td>',
+        '<td class="doc_fieldText">A277437 Amendment #1</td>',
+        1,
+    )
+
+    detail = parse_item_detail(html, _DETAIL_URL)
+
+    assert detail.source_id == "A277437"
+
+
 def test_reconciles_search_and_detail_values() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
     search_result = SearchResultRecord(

@@ -20,14 +20,16 @@ _WINDOW_LOCATION = re.compile(
     r"window\.location\s*=\s*[\"'](?P<url>[^\"']+)[\"']",
     re.IGNORECASE,
 )
+_LEADING_BID_VALUE = re.compile(r"^\$?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?")
+_DETAIL_AUCTION_NUMBER = re.compile(r"^(A\d+)(?:\s+Amendment\s+#\d+)?$")
 
 
 def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
     soup = BeautifulSoup(html, "lxml")
     _validate_page_identity(soup)
 
-    source_id = _label_value(soup, "Auction Number:")
-    if not source_id:
+    source_id = _source_id(soup)
+    if source_id is None:
         raise ParserContractError("auction detail did not contain an auction number")
 
     closing_at = _parse_closing_at(
@@ -170,6 +172,12 @@ def _label_value(soup: BeautifulSoup, label: str) -> str:
     return _text(value_cell)
 
 
+def _source_id(soup: BeautifulSoup) -> str | None:
+    value = _label_value(soup, "Auction Number:")
+    source_id_match = _DETAIL_AUCTION_NUMBER.fullmatch(value)
+    return source_id_match.group(1) if source_id_match is not None else None
+
+
 def _label_cell(soup: BeautifulSoup, label: str) -> Tag | None:
     for label_cell in soup.select("td.doc_labelColour, td.doc_tableHeader"):
         if _text(label_cell) != label:
@@ -195,7 +203,8 @@ def _current_bid_value(soup: BeautifulSoup) -> str:
             continue
         value = _normalize_text(str(child))
         if value:
-            return value
+            bid_match = _LEADING_BID_VALUE.match(value)
+            return bid_match.group(0) if bid_match is not None else value
     return ""
 
 
