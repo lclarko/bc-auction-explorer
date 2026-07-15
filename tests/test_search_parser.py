@@ -14,7 +14,7 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _fixture(name: str) -> str:
-    return (_FIXTURES / name).read_text(encoding="windows-1252")
+    return (_FIXTURES / name).read_text(encoding="utf-8")
 
 
 def test_parses_the_captured_search_flow() -> None:

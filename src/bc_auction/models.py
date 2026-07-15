@@ -4,6 +4,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
+from bc_auction.urls import canonicalize_source_url, normalize_public_url
+
 
 class AuctionStatus(StrEnum):
     OPEN = "open"
@@ -30,9 +32,10 @@ class NormalizedLocation(BaseModel):
 class SearchResultRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    source_url: HttpUrl
     source_id: str
-    title: str
+    canonical_source_url: HttpUrl
+    request_url: HttpUrl = Field(exclude=True, repr=False)
+    title: str | None
     location_raw: str | None = None
     current_bid: Decimal | None = Field(default=None, ge=0)
     minimum_bid: Decimal | None = Field(default=None, ge=0)
@@ -50,6 +53,13 @@ class SearchResultRecord(BaseModel):
             raise ValueError("datetime must include a timezone")
         return value
 
+    @field_validator("canonical_source_url")
+    @classmethod
+    def require_canonical_source_url(cls, value: HttpUrl) -> HttpUrl:
+        if canonicalize_source_url(str(value)) != str(value):
+            raise ValueError("canonical source URL must be session-free and normalized")
+        return value
+
 
 class SearchPagination(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -58,8 +68,8 @@ class SearchPagination(BaseModel):
     record_start: int = Field(ge=1)
     record_end: int = Field(ge=1)
     total_records: int = Field(ge=1)
-    page_urls: tuple[HttpUrl, ...] = ()
-    next_page_url: HttpUrl | None = None
+    request_page_urls: tuple[HttpUrl, ...] = Field(default=(), exclude=True, repr=False)
+    next_request_url: HttpUrl | None = Field(default=None, exclude=True, repr=False)
 
 
 class SearchResultsPage(BaseModel):
@@ -72,8 +82,9 @@ class SearchResultsPage(BaseModel):
 class AuctionDetailRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    source_url: HttpUrl
     source_id: str
+    canonical_source_url: HttpUrl | None = None
+    request_url: HttpUrl = Field(exclude=True, repr=False)
     title: str
     description: str | None = None
     category_raw: str | None = None
@@ -95,13 +106,24 @@ class AuctionDetailRecord(BaseModel):
             raise ValueError("datetime must include a timezone")
         return value
 
+    @field_validator("canonical_source_url")
+    @classmethod
+    def require_canonical_source_url(cls, value: HttpUrl | None) -> HttpUrl | None:
+        if value is not None and canonicalize_source_url(str(value)) != str(value):
+            raise ValueError("canonical source URL must be session-free and normalized")
+        return value
+
+    @field_validator("image_urls")
+    @classmethod
+    def require_normalized_image_urls(cls, value: tuple[HttpUrl, ...]) -> tuple[HttpUrl, ...]:
+        return _require_normalized_image_urls(value)
+
 
 class AuctionItem(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    source_id: str | None = None
-    source_url: HttpUrl
-    source_search_url: HttpUrl | None = None
+    source_id: str
+    canonical_source_url: HttpUrl
     title: str
     description: str | None = None
     category_raw: str | None = None
@@ -136,3 +158,21 @@ class AuctionItem(BaseModel):
         if value is not None and value.tzinfo is None:
             raise ValueError("datetime must include a timezone")
         return value
+
+    @field_validator("canonical_source_url")
+    @classmethod
+    def require_canonical_source_url(cls, value: HttpUrl) -> HttpUrl:
+        if canonicalize_source_url(str(value)) != str(value):
+            raise ValueError("canonical source URL must be session-free and normalized")
+        return value
+
+    @field_validator("image_urls")
+    @classmethod
+    def require_normalized_image_urls(cls, value: tuple[HttpUrl, ...]) -> tuple[HttpUrl, ...]:
+        return _require_normalized_image_urls(value)
+
+
+def _require_normalized_image_urls(value: tuple[HttpUrl, ...]) -> tuple[HttpUrl, ...]:
+    if any(normalize_public_url(str(image_url)) != str(image_url) for image_url in value):
+        raise ValueError("image URLs must be session-free and normalized")
+    return value

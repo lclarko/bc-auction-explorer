@@ -31,7 +31,7 @@ class _SuccessfulClient:
         return None
 
     def search_open_auctions(self) -> FetchedPage:
-        return _page("results-open-page-1.html", _RESULTS_URL, "text/html; charset=windows-1252")
+        return _page("results-open-page-1.html", _RESULTS_URL, "text/html; charset=utf-8")
 
     def get_item_detail(self, source_url: str) -> FetchedPage:
         assert source_url.startswith("https://www.bcauction.ca/open.dll/showDisplayDocument?")
@@ -49,8 +49,9 @@ def test_manual_scrape_prints_redacted_structured_output(monkeypatch, capsys) ->
     assert captured.err == ""
     assert output["failures"] == []
     assert output["records"][0]["source_id"] == "A277437"
-    assert "sessionID=REDACTED" in output["records"][0]["source_url"]
-    assert "SESSION_ID" not in output["records"][0]["source_url"]
+    assert "sessionID" not in output["records"][0]["canonical_source_url"]
+    assert "SESSION_ID" not in output["records"][0]["canonical_source_url"]
+    assert "request_url" not in output["records"][0]
 
 
 def test_manual_scrape_reports_detail_parser_failures(monkeypatch, capsys) -> None:
@@ -87,7 +88,7 @@ def test_collect_search_records_follows_pagination() -> None:
             return _page(
                 "results-open-page-2.html",
                 page_url,
-                "text/html; charset=windows-1252",
+                "text/html; charset=utf-8",
             )
 
     client = PaginatedClient()
@@ -123,7 +124,7 @@ def test_collect_search_records_enforces_the_maximum_page_limit(monkeypatch) -> 
             return _page(
                 "results-open-page-2.html",
                 page_url,
-                "text/html; charset=windows-1252",
+                "text/html; charset=utf-8",
             )
 
     monkeypatch.setattr(cli, "_MAX_SEARCH_PAGES", 1)
@@ -141,7 +142,7 @@ def test_collect_search_records_rejects_pagination_regression() -> None:
             return _page(
                 "results-open-page-1.html",
                 page_url,
-                "text/html; charset=windows-1252",
+                "text/html; charset=utf-8",
             )
 
     with pytest.raises(ParserContractError, match="did not advance to a later page"):

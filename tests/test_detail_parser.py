@@ -30,7 +30,7 @@ def test_parses_captured_titleless_item_detail() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
 
     assert detail.source_id == "A277437"
-    assert detail.title.startswith("2011 Ford F150")
+    assert detail.title == "Sanitized vehicle listing"
     assert detail.description == "Sanitized vehicle condition details."
     assert detail.category_raw == "Vehicles & Automotive"
     assert detail.location_raw == "Kelowna"
@@ -49,10 +49,11 @@ def test_parses_captured_titleless_item_detail() -> None:
 def test_reconciles_search_and_detail_values() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
     search_result = SearchResultRecord(
-        source_url=(
+        request_url=(
             "https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=8733643"
         ),
         source_id="A277437",
+        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
         title=detail.title,
         location_raw=None,
         current_bid=Decimal("900.00"),
@@ -62,7 +63,8 @@ def test_reconciles_search_and_detail_values() -> None:
 
     reconciled = reconcile_search_result(search_result, detail)
 
-    assert reconciled.source_url == search_result.source_url
+    assert reconciled.request_url == search_result.request_url
+    assert reconciled.canonical_source_url == search_result.canonical_source_url
     assert reconciled.current_bid == Decimal("1000.00")
     assert reconciled.location_raw == "Kelowna"
 
@@ -70,11 +72,12 @@ def test_reconciles_search_and_detail_values() -> None:
 def test_reconciles_same_auction_with_detail_title_authoritative() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
     search_result = SearchResultRecord(
-        source_url=(
+        request_url=(
             "https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=8733643"
         ),
         source_id=detail.source_id,
-        title="2011 Ford F150",
+        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
+        title="Search title",
     )
 
     reconciled = reconcile_search_result(search_result, detail)
@@ -85,8 +88,9 @@ def test_reconciles_same_auction_with_detail_title_authoritative() -> None:
 def test_rejects_mismatched_search_and_detail_ids() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
     search_result = SearchResultRecord(
-        source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1",
+        request_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1",
         source_id="A000001",
+        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1",
         title=detail.title,
     )
 
@@ -119,6 +123,19 @@ def test_deduplicates_image_urls_while_preserving_order() -> None:
         "https://www.bcauction.ca/Pictures/8733643_Small3.jpg",
         "https://www.bcauction.ca/Pictures/8733643_Small4.jpg",
     ]
+
+
+def test_strips_session_ids_from_image_urls_before_serialization() -> None:
+    html = _detail().replace(
+        "/Pictures/8733643_Main.jpg",
+        "/Pictures/8733643_Main.jpg?sessionID=SECRET&size=large",
+        1,
+    )
+
+    detail = parse_item_detail(html, _DETAIL_URL)
+
+    assert str(detail.image_urls[0]).endswith("Pictures/8733643_Main.jpg?size=large")
+    assert "SECRET" not in detail.model_dump_json()
 
 
 def test_detail_hash_ignores_session_id_in_the_page_url() -> None:

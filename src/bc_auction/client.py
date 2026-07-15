@@ -188,6 +188,7 @@ class AuctionClient:
         hostname = urlparse(source_url).hostname
         if hostname is None:
             raise ValueError("unable to set a session cookie without a hostname")
+        # BC Auction's welcome JavaScript appends the session ID between pipe delimiters.
         self._client.cookies.set("sessionID", f"|{session_id}|", domain=hostname, path="/")
 
     def _check_host(self, url: str) -> None:

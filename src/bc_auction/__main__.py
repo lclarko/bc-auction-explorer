@@ -3,7 +3,6 @@ import json
 import re
 import sys
 from collections.abc import Sequence
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 
@@ -59,12 +58,12 @@ def _collect_search_records(client: AuctionClient, limit: int) -> tuple[SearchRe
 
         if len(records) == limit or pagination is None:
             break
-        next_page_url = pagination.next_page_url
-        if next_page_url is None:
+        next_request_url = pagination.next_request_url
+        if next_request_url is None:
             break
         if pages_seen >= _MAX_SEARCH_PAGES:
             raise ParserContractError("search results exceeded the maximum page limit")
-        page = client.get(str(next_page_url))
+        page = client.get(str(next_request_url))
 
     return tuple(records)
 
@@ -77,29 +76,18 @@ def scrape(
     failures: list[dict[str, str]] = []
     for search_result in _collect_search_records(client, limit):
         try:
-            detail_page = client.get_item_detail(str(search_result.source_url))
+            detail_page = client.get_item_detail(str(search_result.request_url))
             detail = parse_item_detail(detail_page.decode().text, detail_page.url)
             records.append(reconcile_search_result(search_result, detail))
         except (ScraperError, httpx.HTTPError, ValueError) as exc:
             failures.append(
                 {
                     "source_id": search_result.source_id,
-                    "source_url": _redact_url(str(search_result.source_url)),
+                    "canonical_source_url": str(search_result.canonical_source_url),
                     "error": _redact_session_id(str(exc)),
                 }
             )
     return records, failures
-
-
-def _redact_url(value: str) -> str:
-    parsed = urlsplit(value)
-    query = urlencode(
-        [
-            (name, "REDACTED" if name.casefold() == "sessionid" else query_value)
-            for name, query_value in parse_qsl(parsed.query, keep_blank_values=True)
-        ]
-    )
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, query, parsed.fragment))
 
 
 def _redact_session_id(value: str) -> str:
@@ -127,10 +115,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     output = {
-        "records": [
-            {**record.model_dump(mode="json"), "source_url": _redact_url(str(record.source_url))}
-            for record in records
-        ],
+        "records": [record.model_dump(mode="json") for record in records],
         "failures": failures,
     }
     print(json.dumps(output, indent=2))

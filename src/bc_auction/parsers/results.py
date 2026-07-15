@@ -15,6 +15,7 @@ from bc_auction.models import (
     SearchResultRecord,
     SearchResultsPage,
 )
+from bc_auction.urls import canonicalize_source_url, normalize_public_url
 
 _EMPTY_RESULT_TEXT = "There were no results for the specified search."
 _PAGE_RANGE = re.compile(r"(\d+)\s*-\s*(\d+)\s*/\s*(\d+)")
@@ -31,12 +32,13 @@ class _ResultColumnMap:
     summary_cell_count: int
     detail_cell_count: int
     auction_number: int
-    title: int
+    title: int | None
     current_bid: int
     closing_at: int
     title_in_detail: bool
     closing_at_in_detail: bool
     location: int | None = None
+    bid_count: int | None = None
 
 
 _OPEN_COLUMNS = _ResultColumnMap(
@@ -49,6 +51,18 @@ _OPEN_COLUMNS = _ResultColumnMap(
     title_in_detail=False,
     closing_at_in_detail=True,
     location=4,
+)
+
+_CLOSED_COLUMNS = _ResultColumnMap(
+    summary_cell_count=6,
+    detail_cell_count=3,
+    auction_number=1,
+    title=None,
+    current_bid=4,
+    closing_at=3,
+    title_in_detail=False,
+    closing_at_in_detail=False,
+    bid_count=5,
 )
 
 
@@ -109,6 +123,10 @@ def _detect_columns(soup: BeautifulSoup) -> _ResultColumnMap:
     if _OPEN_HEADINGS <= headings:
         return _OPEN_COLUMNS
 
+    closed_headings = {"Auction No", "Published Date", "Closing Date", "High Bid", "Bids"}
+    if closed_headings <= headings:
+        return _CLOSED_COLUMNS
+
     expected = ", ".join(sorted(_OPEN_HEADINGS))
     raise ParserContractError(f"results page was missing a recognized heading set: {expected}")
 
@@ -130,13 +148,15 @@ def _parse_record(link: Tag, columns: _ResultColumnMap, base_url: str) -> Search
     if len(detail_cells) != columns.detail_cell_count:
         raise ParserContractError("auction detail row did not have the expected content cells")
 
-    title_cell = (
-        detail_cells[columns.title] if columns.title_in_detail else summary_cells[columns.title]
-    )
-    title_marker = title_cell.select_one("span.searchResultsTitle")
-    title = _text(title_marker) if title_marker is not None else _text(title_cell)
-    if not title:
-        raise ParserContractError("auction result did not contain a title")
+    title: str | None = None
+    if columns.title is not None:
+        title_cell = (
+            detail_cells[columns.title] if columns.title_in_detail else summary_cells[columns.title]
+        )
+        title_marker = title_cell.select_one("span.searchResultsTitle")
+        title = _text(title_marker) if title_marker is not None else _text(title_cell)
+        if not title:
+            raise ParserContractError("auction result did not contain a title")
 
     closing_cell = (
         detail_cells[columns.closing_at]
@@ -145,14 +165,20 @@ def _parse_record(link: Tag, columns: _ResultColumnMap, base_url: str) -> Search
     )
     status_raw, status = _parse_status(summary_cells[columns.auction_number])
     location_raw = _text(summary_cells[columns.location]) if columns.location is not None else None
+    request_url = _item_url(link, base_url)
     return SearchResultRecord(
-        source_url=_item_url(link, base_url),
         source_id=source_id,
+        canonical_source_url=_HTTP_URL.validate_python(canonicalize_source_url(str(request_url))),
+        request_url=request_url,
         title=title,
         location_raw=location_raw,
         current_bid=_parse_decimal(_text(summary_cells[columns.current_bid]), "current bid"),
         minimum_bid=None,
-        bid_count=None,
+        bid_count=(
+            _parse_int(_text(summary_cells[columns.bid_count]), "bid count")
+            if columns.bid_count is not None
+            else None
+        ),
         closing_at=_parse_closing_at(_text(closing_cell)),
         status_raw=status_raw,
         status=status,
@@ -233,6 +259,15 @@ def _parse_decimal(value: str, field_name: str) -> Decimal | None:
         raise ParserContractError(f"auction {field_name} was not a decimal") from exc
 
 
+def _parse_int(value: str, field_name: str) -> int | None:
+    if not value:
+        return None
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ParserContractError(f"auction {field_name} was not an integer") from exc
+
+
 def _parse_closing_at(value: str) -> datetime:
     try:
         return datetime.strptime(value, "%Y/%m/%d %H:%M").replace(tzinfo=_PACIFIC_TIME)
@@ -261,8 +296,8 @@ def _parse_pagination(soup: BeautifulSoup, base_url: str) -> SearchPagination:
         record_start=record_start,
         record_end=record_end,
         total_records=total_records,
-        page_urls=tuple(url for _, url in sorted(page_urls.items())),
-        next_page_url=page_urls.get(current_page + 1),
+        request_page_urls=tuple(url for _, url in sorted(page_urls.items())),
+        next_request_url=page_urls.get(current_page + 1),
     )
 
 
@@ -279,13 +314,13 @@ def _validate_pagination(pagination: SearchPagination, record_count: int) -> Non
         raise ParserContractError("results page record count did not match its record range")
 
     if pagination.record_end == pagination.total_records:
-        if pagination.next_page_url is not None:
+        if pagination.next_request_url is not None:
             raise ParserContractError("the final results page had a next-page URL")
         return
-    if pagination.next_page_url is None:
+    if pagination.next_request_url is None:
         raise ParserContractError("a non-final results page did not have a next-page URL")
 
-    next_page_number = _page_number(str(pagination.next_page_url))
+    next_page_number = _page_number(str(pagination.next_request_url))
     if next_page_number is None:
         raise ParserContractError("results page next-page URL did not contain a page number")
     if next_page_number <= pagination.current_page:
@@ -301,10 +336,13 @@ def _page_urls(soup: BeautifulSoup, base_url: str) -> dict[int, HttpUrl]:
             continue
         parsed_url = _HTTP_URL.validate_python(page_url)
         existing_url = page_urls.get(current_page)
-        if existing_url is not None and str(existing_url) != str(parsed_url):
-            raise ParserContractError(
-                f"results page had conflicting URLs for pagination page {current_page}"
-            )
+        if existing_url is not None:
+            existing_identity = normalize_public_url(str(existing_url))
+            parsed_identity = normalize_public_url(str(parsed_url))
+            if existing_identity != parsed_identity:
+                raise ParserContractError(
+                    f"results page had conflicting URLs for pagination page {current_page}"
+                )
         page_urls[current_page] = parsed_url
     return page_urls
 

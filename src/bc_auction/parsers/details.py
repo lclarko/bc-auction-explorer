@@ -12,6 +12,7 @@ from pydantic import HttpUrl, TypeAdapter
 
 from bc_auction.errors import ParserContractError
 from bc_auction.models import AuctionDetailRecord, AuctionStatus, SearchResultRecord
+from bc_auction.urls import normalize_public_url
 
 _PACIFIC_TIME = ZoneInfo("America/Vancouver")
 _HTTP_URL = TypeAdapter(HttpUrl)
@@ -47,8 +48,8 @@ def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
     bid_count = _parse_int(_label_value(soup, "Number Of Bids:"), "bid count")
     image_urls = _image_urls(soup, page_url)
     return AuctionDetailRecord(
-        source_url=_HTTP_URL.validate_python(page_url),
         source_id=source_id,
+        request_url=_HTTP_URL.validate_python(page_url),
         title=title,
         description=description,
         category_raw=category_raw,
@@ -114,7 +115,8 @@ def reconcile_search_result(
 
     return detail.model_copy(
         update={
-            "source_url": search_result.source_url,
+            "canonical_source_url": search_result.canonical_source_url,
+            "request_url": search_result.request_url,
             "location_raw": detail.location_raw or search_result.location_raw,
             "current_bid": (
                 detail.current_bid if detail.current_bid is not None else search_result.current_bid
@@ -258,7 +260,11 @@ def _image_urls(soup: BeautifulSoup, page_url: str) -> tuple[HttpUrl, ...]:
         image_url = urljoin(page_url, str(image["src"]))
         if urlparse(image_url).netloc.casefold() != page_host:
             raise ParserContractError("auction detail image URL left the configured host")
-        validated_url = _HTTP_URL.validate_python(image_url)
+        try:
+            normalized_image_url = normalize_public_url(image_url)
+        except ValueError as exc:
+            raise ParserContractError("auction detail image URL contained a session ID") from exc
+        validated_url = _HTTP_URL.validate_python(normalized_image_url)
         normalized_url = str(validated_url)
         if normalized_url in seen_urls:
             continue
