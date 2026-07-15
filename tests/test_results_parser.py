@@ -1,38 +1,107 @@
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from bc_auction.errors import ParserContractError
-from bc_auction.parsers import parse_search_results
+from bc_auction.models import AuctionStatus
+from bc_auction.parsers import SearchPageTracker, parse_search_results
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+_RESULTS_URL = "https://www.bcauction.ca/open.dll/submitDocSearch"
 
 
-def test_parses_known_two_row_result_shape() -> None:
+def _fixture(name: str) -> str:
+    return (_FIXTURES / name).read_text(encoding="windows-1252")
+
+
+def test_parses_captured_open_results_page() -> None:
+    page = parse_search_results(_fixture("results-open-page-1.html"), _RESULTS_URL)
+
+    assert len(page.records) == 30
+    assert page.pagination is not None
+    assert page.pagination.current_page == 1
+    assert page.pagination.record_start == 1
+    assert page.pagination.record_end == 30
+    assert page.pagination.total_records == 131
+    assert len(page.pagination.page_urls) == 4
+    assert page.pagination.next_page_url is not None
+    assert parse_qs(urlparse(str(page.pagination.next_page_url)).query)["currentPage"] == ["2"]
+
+    first = page.records[0]
+    assert first.source_id == "A277437"
+    assert first.title.startswith("2011 Ford F150")
+    assert first.location_raw == "Kelowna"
+    assert first.current_bid == Decimal("1776.00")
+    assert first.minimum_bid is None
+    assert first.bid_count is None
+    assert first.closing_at == datetime(2026, 7, 15, 18, 0, tzinfo=ZoneInfo("America/Vancouver"))
+    assert first.status_raw == "OpenDocument0.gif"
+    assert first.status == AuctionStatus.OPEN
+    assert str(first.source_url).startswith("https://www.bcauction.ca/open.dll/showDisplayDocument?")
+
+
+def test_parses_next_page_and_highest_price_sort() -> None:
+    second_page = parse_search_results(_fixture("results-open-page-2.html"), _RESULTS_URL)
+    highest_price = parse_search_results(_fixture("results-open-highest-price.html"), _RESULTS_URL)
+
+    assert second_page.pagination is not None
+    assert second_page.pagination.current_page == 2
+    assert second_page.pagination.record_start == 31
+    assert second_page.records[0].source_id == "A277450"
+
+    assert highest_price.pagination is not None
+    assert highest_price.records[0].current_bid == Decimal("25300.00")
+    assert highest_price.pagination.next_page_url is not None
+    query = parse_qs(urlparse(str(highest_price.pagination.next_page_url)).query)
+    assert query["display_order"] == ["HighestPrice"]
+
+
+def test_parses_captured_empty_results_page() -> None:
+    page = parse_search_results(_fixture("results-empty.html"), _RESULTS_URL)
+
+    assert page.records == ()
+    assert page.pagination is None
+
+
+def test_rejects_markup_without_results_or_the_empty_marker() -> None:
     html = """
-    <table>
-      <tr>
-        <td><a href="/open.dll/item?id=42">Utility trailer</a></td>
-        <td width="75">Victoria - Uvic</td>
-        <td>$120.00</td>
-      </tr>
-      <tr name="infoDetail">
-        <td colspan="3">Closes July 30, 2026</td>
-      </tr>
-    </table>
+    <html><head><title>Browse Auctions</title></head>
+    <body><form action="submitDocSearch"></form></body></html>
     """
 
-    records = parse_search_results(html, "https://www.bcauction.ca/")
-
-    assert len(records) == 1
-    assert str(records[0].source_url) == "https://www.bcauction.ca/open.dll/item?id=42"
-    assert records[0].location_raw == "Victoria - Uvic"
-    assert records[0].summary_cells == ("Utility trailer", "Victoria - Uvic", "$120.00")
-    assert records[0].detail_text == "Closes July 30, 2026"
+    with pytest.raises(ParserContractError, match="recognized heading set"):
+        parse_search_results(html, _RESULTS_URL)
 
 
-def test_returns_empty_tuple_when_no_detail_rows_exist() -> None:
-    assert parse_search_results("<table></table>", "https://www.bcauction.ca/") == ()
+def test_rejects_duplicate_source_ids() -> None:
+    html = _fixture("results-open-page-1.html").replace("A277501", "A277437")
+
+    with pytest.raises(ParserContractError, match="duplicate source IDs"):
+        parse_search_results(html, _RESULTS_URL)
 
 
-def test_rejects_orphan_detail_row() -> None:
-    html = '<table><tr name="infoDetail"><td>orphan</td></tr></table>'
+def test_rejects_cross_host_detail_urls() -> None:
+    html = _fixture("results-open-page-1.html").replace(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument",
+        "https://example.com/open.dll/showDisplayDocument",
+        1,
+    )
 
-    with pytest.raises(ParserContractError):
-        parse_search_results(html, "https://www.bcauction.ca/")
+    with pytest.raises(ParserContractError, match="configured host"):
+        parse_search_results(html, _RESULTS_URL)
+
+
+def test_tracker_rejects_repeated_pages_and_source_ids() -> None:
+    first_page = parse_search_results(_fixture("results-open-page-1.html"), _RESULTS_URL)
+    second_page = parse_search_results(_fixture("results-open-page-2.html"), _RESULTS_URL)
+    tracker = SearchPageTracker()
+
+    tracker.add(first_page)
+    tracker.add(second_page)
+
+    with pytest.raises(ParserContractError, match="duplicate search-results page"):
+        tracker.add(first_page)

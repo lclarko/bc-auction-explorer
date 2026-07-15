@@ -30,11 +30,43 @@ class NormalizedLocation(BaseModel):
 class SearchResultRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    source_url: HttpUrl | None = None
-    source_id: str | None = None
+    source_url: HttpUrl
+    source_id: str
+    title: str
     location_raw: str | None = None
+    current_bid: Decimal | None = Field(default=None, ge=0)
+    minimum_bid: Decimal | None = Field(default=None, ge=0)
+    bid_count: int | None = Field(default=None, ge=0)
+    closing_at: datetime | None = None
+    status_raw: str | None = None
+    status: AuctionStatus = AuctionStatus.UNKNOWN
     summary_cells: tuple[str, ...] = ()
     detail_text: str = ""
+
+    @field_validator("closing_at")
+    @classmethod
+    def require_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("datetime must include a timezone")
+        return value
+
+
+class SearchPagination(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    current_page: int = Field(ge=1)
+    record_start: int = Field(ge=1)
+    record_end: int = Field(ge=1)
+    total_records: int = Field(ge=1)
+    page_urls: tuple[HttpUrl, ...] = ()
+    next_page_url: HttpUrl | None = None
+
+
+class SearchResultsPage(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    records: tuple[SearchResultRecord, ...] = ()
+    pagination: SearchPagination | None = None
 
 
 class AuctionItem(BaseModel):
