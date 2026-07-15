@@ -7,14 +7,23 @@ import pytest
 
 from bc_auction.errors import ParserContractError
 from bc_auction.models import AuctionStatus, SearchResultRecord
-from bc_auction.parsers import parse_item_detail, reconcile_search_result
+from bc_auction.parsers import (
+    parse_detail_summary_url,
+    parse_detail_working_url,
+    parse_item_detail,
+    reconcile_search_result,
+)
 
-_FIXTURE = Path(__file__).parent / "fixtures" / "item-detail.html"
+_FIXTURES = Path(__file__).parent / "fixtures"
 _DETAIL_URL = "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=SESSION_ID&disID=8733643"
 
 
 def _detail() -> str:
-    return _FIXTURE.read_text()
+    return (_FIXTURES / "item-detail.html").read_text()
+
+
+def _fixture(name: str) -> str:
+    return (_FIXTURES / name).read_text()
 
 
 def test_parses_captured_titleless_item_detail() -> None:
@@ -89,3 +98,22 @@ def test_rejects_a_malformed_minimum_bid() -> None:
 
     with pytest.raises(ParserContractError, match="minimum bid"):
         parse_item_detail(html, _DETAIL_URL)
+
+
+def test_parses_detail_frame_navigation() -> None:
+    frame_url = "https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID"
+    working_url = parse_detail_working_url(_fixture("item-detail-frame.html"), frame_url)
+    summary_url = parse_detail_summary_url(_fixture("item-detail-working.html"), working_url)
+
+    assert working_url.startswith("https://www.bcauction.ca/open.dll/showWorking?")
+    assert summary_url == _DETAIL_URL
+
+
+def test_rejects_cross_host_detail_summary_route() -> None:
+    html = _fixture("item-detail-working.html").replace(
+        "showDocSummary?",
+        "https://example.com/open.dll/showDocSummary?",
+    )
+
+    with pytest.raises(ParserContractError, match="configured host"):
+        parse_detail_summary_url(html, _DETAIL_URL)

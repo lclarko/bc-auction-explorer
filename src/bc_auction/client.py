@@ -8,6 +8,7 @@ from urllib.parse import urlencode, urljoin, urlparse
 import httpx
 
 from bc_auction.encoding import DecodedPage, decode_html
+from bc_auction.parsers.details import parse_detail_summary_url, parse_detail_working_url
 from bc_auction.parsers.search import (
     parse_browse_url,
     parse_search_form,
@@ -94,6 +95,16 @@ class AuctionClient:
             search_form.action_url,
             search_form.open_auction_fields(keyword=keyword, display_order=display_order),
         )
+
+    def get_item_detail(self, path_or_url: str) -> FetchedPage:
+        detail_frame_page = self.get(path_or_url)
+        working_url = parse_detail_working_url(
+            detail_frame_page.decode().text,
+            detail_frame_page.url,
+        )
+        working_page = self.get(working_url)
+        summary_url = parse_detail_summary_url(working_page.decode().text, working_page.url)
+        return self.get(summary_url)
 
     def _request(
         self,

@@ -132,3 +132,27 @@ def test_client_rejects_cross_host_post_redirect() -> None:
     with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ValueError, match="outside the configured host"):
             client.post_form("/open.dll/submitDocSearch", (("Keyword", "truck"),))
+
+
+def test_client_follows_item_detail_frames() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/open.dll/showDisplayDocument":
+            return httpx.Response(200, content=_fixture("item-detail-frame.html"), request=request)
+        if request.url.path == "/open.dll/showWorking":
+            return httpx.Response(
+                200,
+                content=_fixture("item-detail-working.html"),
+                request=request,
+            )
+        if request.url.path == "/open.dll/showDocSummary":
+            return httpx.Response(200, content=_fixture("item-detail.html"), request=request)
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        page = client.get_item_detail(
+            "/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=8733643"
+        )
+
+    assert page.url == (
+        "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=SESSION_ID&disID=8733643"
+    )

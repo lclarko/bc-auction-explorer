@@ -1,4 +1,5 @@
 import hashlib
+import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from urllib.parse import parse_qs, urljoin, urlparse
@@ -13,6 +14,10 @@ from bc_auction.models import AuctionDetailRecord, AuctionStatus, SearchResultRe
 
 _PACIFIC_TIME = ZoneInfo("America/Vancouver")
 _HTTP_URL = TypeAdapter(HttpUrl)
+_WINDOW_LOCATION = re.compile(
+    r"window\.location\s*=\s*[\"'](?P<url>[^\"']+)[\"']",
+    re.IGNORECASE,
+)
 
 
 def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
@@ -48,6 +53,33 @@ def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
         image_urls=_image_urls(soup, page_url),
         content_hash=_content_hash(soup),
     )
+
+
+def parse_detail_working_url(html: str, page_url: str) -> str:
+    soup = BeautifulSoup(html, "lxml")
+    working_urls = [
+        _detail_route_url(str(frame["src"]), page_url, "showWorking")
+        for frame in soup.select("frame[src]")
+        if urlparse(urljoin(page_url, str(frame["src"]))).path.casefold().endswith("/showworking")
+    ]
+    if len(working_urls) != 1:
+        raise ParserContractError("item detail frame did not contain one working-page URL")
+    return working_urls[0]
+
+
+def parse_detail_summary_url(html: str, page_url: str) -> str:
+    summary_urls = [
+        _detail_route_url(match.group("url"), page_url, "showDocSummary")
+        for match in _WINDOW_LOCATION.finditer(html)
+        if (
+            urlparse(urljoin(page_url, match.group("url"))).path.casefold().endswith(
+                "/showdocsummary"
+            )
+        )
+    ]
+    if len(summary_urls) != 1:
+        raise ParserContractError("item detail working page did not contain one summary URL")
+    return summary_urls[0]
 
 
 def reconcile_search_result(
@@ -89,6 +121,16 @@ def _validate_page_identity(soup: BeautifulSoup) -> None:
         raise ParserContractError("auction detail did not contain an auction number input")
     if _label_cell(soup, "Auction Number:") is None:
         raise ParserContractError("auction detail did not contain an auction number")
+
+
+def _detail_route_url(source_url: str, page_url: str, endpoint: str) -> str:
+    route_url = urljoin(page_url, source_url)
+    parsed_route = urlparse(route_url)
+    if parsed_route.netloc.casefold() != urlparse(page_url).netloc.casefold():
+        raise ParserContractError("item detail route left the configured host")
+    if not parsed_route.path.casefold().endswith(f"/{endpoint.casefold()}"):
+        raise ParserContractError(f"item detail route did not use {endpoint}")
+    return route_url
 
 
 def _label_value(soup: BeautifulSoup, label: str) -> str:
