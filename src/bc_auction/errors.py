@@ -8,3 +8,7 @@ class DecodeError(ScraperError):
 
 class ParserContractError(ScraperError):
     pass
+
+
+class ResponseContractError(ScraperError):
+    pass

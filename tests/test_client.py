@@ -4,7 +4,9 @@ from urllib.parse import parse_qs
 import httpx
 import pytest
 
+import bc_auction.client as client_module
 from bc_auction.client import AuctionClient
+from bc_auction.errors import ResponseContractError
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -142,7 +144,7 @@ def test_client_preserves_post_redirect_method_semantics(
                 request=request,
             )
         redirected_request = request
-        return httpx.Response(200, request=request)
+        return httpx.Response(200, content=b"<html>results</html>", request=request)
 
     with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
         client.post_form("/start", (("Keyword", "truck"),))
@@ -235,3 +237,149 @@ def test_client_follows_item_detail_frames() -> None:
     assert page.url == (
         "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=SESSION_ID&disID=8733643"
     )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "error"),
+    [
+        ({"base_url": "/relative"}, "absolute HTTP URL"),
+        ({"min_request_interval": -1}, "min_request_interval"),
+        ({"timeout": 0}, "timeout"),
+        ({"max_redirects": -1}, "max_redirects"),
+        ({"max_retries": -1}, "max_retries"),
+        ({"retry_backoff": -1}, "retry_backoff"),
+        ({"max_html_bytes": 0}, "max_html_bytes"),
+    ],
+)
+def test_client_rejects_invalid_configuration(kwargs: dict[str, object], error: str) -> None:
+    with pytest.raises(ValueError, match=error):
+        AuctionClient(**kwargs)
+
+
+def test_client_retries_a_connection_failure() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise httpx.ConnectError("connection failed", request=request)
+        return httpx.Response(200, content=b"<html>recovered</html>", request=request)
+
+    with AuctionClient(
+        min_request_interval=0,
+        max_retries=1,
+        retry_backoff=0,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        page = client.get("/retries")
+
+    assert page.body == b"<html>recovered</html>"
+    assert attempts == 2
+
+
+@pytest.mark.parametrize("status_code", [429, 502, 503, 504])
+def test_client_retries_the_supported_response_statuses(status_code: int) -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(status_code, request=request)
+        return httpx.Response(200, content=b"<html>recovered</html>", request=request)
+
+    with AuctionClient(
+        min_request_interval=0,
+        max_retries=1,
+        retry_backoff=0,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        client.get("/retries")
+
+    assert attempts == 2
+
+
+def test_client_honors_retry_after_with_a_bounded_delay(monkeypatch) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, headers={"retry-after": "2"}, request=request)
+        return httpx.Response(200, content=b"<html>recovered</html>", request=request)
+
+    monkeypatch.setattr(client_module.time, "sleep", delays.append)
+    with AuctionClient(
+        min_request_interval=0,
+        max_retries=1,
+        retry_backoff=0,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        client.get("/retries")
+
+    assert delays == [2.0]
+
+
+def test_client_does_not_retry_an_ordinary_server_error() -> None:
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(500, request=request)
+
+    with AuctionClient(
+        min_request_interval=0,
+        max_retries=2,
+        retry_backoff=0,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            client.get("/no-retry")
+
+    assert attempts == 1
+
+
+@pytest.mark.parametrize(
+    ("body", "headers", "max_html_bytes", "error"),
+    [
+        (b"", {}, 100, "empty"),
+        (b"<html>too large</html>", {}, 4, "maximum size"),
+        (b"\x00\x01\x02", {}, 100, "binary"),
+        (b"{\"unexpected\": true}", {"content-type": "application/json"}, 100, "content type"),
+    ],
+)
+def test_client_rejects_invalid_html_responses(
+    body: bytes,
+    headers: dict[str, str],
+    max_html_bytes: int,
+    error: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=body, headers=headers, request=request)
+
+    with AuctionClient(
+        min_request_interval=0,
+        max_html_bytes=max_html_bytes,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(ResponseContractError, match=error):
+            client.get("/invalid")
+
+
+def test_client_accepts_textual_legacy_content_types() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"<html>legacy response</html>",
+            headers={"content-type": "application/octet-stream"},
+            request=request,
+        )
+
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        page = client.get("/legacy")
+
+    assert page.body == b"<html>legacy response</html>"
