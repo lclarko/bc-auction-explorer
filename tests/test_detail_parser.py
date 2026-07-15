@@ -157,6 +157,31 @@ def test_strips_session_ids_from_image_urls_before_serialization() -> None:
     assert "SECRET" not in detail.model_dump_json()
 
 
+def test_parses_a_no_bid_detail_without_images() -> None:
+    html = _detail().replace(
+        '    <input type="hidden" name="MinimumBid" value="1025.00">',
+        '    <input type="hidden" name="MinimumBid" value="">',
+    )
+    html = html.replace(
+        '          1000.00<img src="../images/watching.gif">(REDACTED)<br>\n',
+        "",
+    )
+    html = html.replace(
+        '<td class="doc_fieldText">3</td>',
+        '<td class="doc_fieldText">0</td>',
+        1,
+    )
+    for image_name in ("Main", "Small1", "Small2", "Small3", "Small4"):
+        html = html.replace(f'    <img src="/Pictures/8733643_{image_name}.jpg">\n', "")
+
+    detail = parse_item_detail(html, _DETAIL_URL)
+
+    assert detail.current_bid is None
+    assert detail.minimum_bid is None
+    assert detail.bid_count == 0
+    assert detail.image_urls == ()
+
+
 def test_detail_hash_ignores_session_id_in_the_page_url() -> None:
     original = parse_item_detail(_detail(), _DETAIL_URL)
     changed_session = parse_item_detail(
