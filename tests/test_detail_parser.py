@@ -85,14 +85,15 @@ def test_reconciles_same_auction_with_detail_title_authoritative() -> None:
     assert reconciled.title == detail.title
 
 
-def test_reconciliation_preserves_a_terminal_search_status() -> None:
-    detail = parse_item_detail(_detail(), _DETAIL_URL)
+def test_reconciliation_preserves_a_closed_search_status_when_detail_looks_open() -> None:
+    detail = parse_item_detail(
+        _fixture("item-detail-closed.html"),
+        "https://www.bcauction.ca/open.dll/showDocSummary?disID=2",
+    )
     search_result = SearchResultRecord(
-        request_url=(
-            "https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=8733643"
-        ),
+        request_url="https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=2",
         source_id=detail.source_id,
-        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
+        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=2",
         title=None,
         status_raw="ClosedDocSearch1.gif",
         status=AuctionStatus.CLOSED,
@@ -102,6 +103,27 @@ def test_reconciliation_preserves_a_terminal_search_status() -> None:
 
     assert reconciled.status_raw == "ClosedDocSearch1.gif"
     assert reconciled.status is AuctionStatus.CLOSED
+
+
+def test_reconciliation_preserves_a_withdrawn_search_status() -> None:
+    detail = parse_item_detail(
+        _fixture("item-detail-withdrawn.html"),
+        "https://www.bcauction.ca/open.dll/showDocSummary?disID=4",
+    )
+    search_result = SearchResultRecord(
+        request_url="https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=4",
+        source_id=detail.source_id,
+        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=4",
+        title=None,
+        status_raw="closed_withdrawn.gif",
+        status=AuctionStatus.WITHDRAWN,
+    )
+
+    reconciled = reconcile_search_result(search_result, detail)
+
+    assert detail.status is AuctionStatus.UNKNOWN
+    assert reconciled.status_raw == "closed_withdrawn.gif"
+    assert reconciled.status is AuctionStatus.WITHDRAWN
 
 
 def test_rejects_mismatched_search_and_detail_ids() -> None:
@@ -158,28 +180,25 @@ def test_strips_session_ids_from_image_urls_before_serialization() -> None:
 
 
 def test_parses_a_no_bid_detail_without_images() -> None:
-    html = _detail().replace(
-        '    <input type="hidden" name="MinimumBid" value="1025.00">',
-        '    <input type="hidden" name="MinimumBid" value="">',
+    detail = parse_item_detail(
+        _fixture("item-detail-no-bid.html"),
+        "https://www.bcauction.ca/open.dll/showDocSummary?disID=3",
     )
-    html = html.replace(
-        '          1000.00<img src="../images/watching.gif">(REDACTED)<br>\n',
-        "",
-    )
-    html = html.replace(
-        '<td class="doc_fieldText">3</td>',
-        '<td class="doc_fieldText">0</td>',
-        1,
-    )
-    for image_name in ("Main", "Small1", "Small2", "Small3", "Small4"):
-        html = html.replace(f'    <img src="/Pictures/8733643_{image_name}.jpg">\n', "")
-
-    detail = parse_item_detail(html, _DETAIL_URL)
 
     assert detail.current_bid is None
     assert detail.minimum_bid is None
     assert detail.bid_count == 0
     assert detail.image_urls == ()
+    assert detail.description is None
+    assert detail.pickup_details is None
+
+
+def test_rejects_an_unavailable_detail_response() -> None:
+    with pytest.raises(ParserContractError, match="not a BC Auction item detail page"):
+        parse_item_detail(
+            _fixture("item-detail-unavailable.html"),
+            "https://www.bcauction.ca/open.dll/showDocSummary?disID=5",
+        )
 
 
 def test_detail_hash_ignores_session_id_in_the_page_url() -> None:

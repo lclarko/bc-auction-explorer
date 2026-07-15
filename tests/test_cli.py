@@ -138,6 +138,24 @@ def test_manual_scrape_reports_detail_parser_failures(monkeypatch, capsys) -> No
     assert captured.err == "1 listing failures\n"
 
 
+def test_manual_scrape_reports_an_unavailable_detail(monkeypatch, capsys) -> None:
+    class UnavailableDetailClient(_SuccessfulClient):
+        def get_item_detail(self, source_url: str) -> FetchedPage:
+            return _page("item-detail-unavailable.html", source_url, "text/html; charset=utf-8")
+
+    monkeypatch.setattr(cli, "AuctionClient", UnavailableDetailClient)
+
+    exit_code = cli.main(["scrape", "--limit", "1"])
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert exit_code == 2
+    assert output["records"] == []
+    assert output["failures"][0]["source_id"] == "A277437"
+    assert "not a BC Auction item detail page" in output["failures"][0]["error"]
+    assert captured.err == "1 listing failures\n"
+
+
 def test_collect_search_records_follows_pagination() -> None:
     class PaginatedClient(_SuccessfulClient):
         def __init__(self) -> None:

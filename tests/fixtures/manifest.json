@@ -42,6 +42,58 @@
       ],
       "source_sha256": "fec1f47231de5289a6258b2573050886d2405c4fd6e2156ff3343e88427ce3b6"
     },
+    "item-detail-closed.html": {
+      "capture": "item-detail-summary",
+      "route": "/open.dll/showDocSummary",
+      "captured_at": "2026-07-15T14:20:00Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": [
+        "closed-detail structure retained",
+        "session IDs removed",
+        "all listing values replaced"
+      ],
+      "source_sha256": "ec968cc5a2a67db6778d8cf5c92c26d9ed5e381ef21563653491378df5968874"
+    },
+    "item-detail-no-bid.html": {
+      "capture": "synthetic-no-bid-detail",
+      "route": "/open.dll/showDocSummary",
+      "captured_at": "2026-07-15T14:30:00Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "utf-8",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": ["synthetic state fixture", "contains no source listing content"],
+      "source_sha256": "4669db45167c80a26f51be06393193e28593041436e1367e83e93571988b623c"
+    },
+    "item-detail-unavailable.html": {
+      "capture": "synthetic-unavailable-detail",
+      "route": "/open.dll/showDocSummary",
+      "captured_at": "2026-07-15T14:30:00Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "utf-8",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": ["synthetic state fixture", "contains no source listing content"],
+      "source_sha256": "f8e9b9252ad94418e4983908dbe33516ef43a98230f72d25ce780c42443e2ae4"
+    },
+    "item-detail-withdrawn.html": {
+      "capture": "synthetic-withdrawn-detail",
+      "route": "/open.dll/showDocSummary",
+      "captured_at": "2026-07-15T14:30:00Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "utf-8",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": ["synthetic state fixture", "contains no source listing content"],
+      "source_sha256": "79f3be84ce1f0a6f8772ff976c9bfdd7b0a5f68bd36a871ad76638f28f999d3c"
+    },
     "results-closed.html": {
       "capture": "search-results-closed",
       "route": "/open.dll/submitDocSearch",
