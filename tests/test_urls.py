@@ -45,19 +45,26 @@ def test_canonicalize_source_url_rejects_an_embedded_session_id() -> None:
 
 
 @pytest.mark.parametrize(
-    "url",
+    ("url", "error"),
     [
-        "http://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
-        "https://example.com/open.dll/showDisplayDocument?disID=8733643",
-        "https://user@www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
-        "https://www.bcauction.ca:8443/open.dll/showDisplayDocument?disID=8733643",
-        "https://www.bcauction.ca/open.dll/showOtherDocument?disID=8733643",
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?docType=Tender",
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=",
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2",
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&unexpected=1",
+        ("http://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
+        ("https://example.com/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
+        ("https://user@www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
+        ("https://www.bcauction.ca:8443/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
+        (
+            "https://www.bcauction.ca/unrelated/showDisplayDocument?disID=8733643",
+            "showDisplayDocument",
+        ),
+        ("https://www.bcauction.ca/open.dll/showDisplayDocument?docType=Tender", "display ID"),
+        ("https://www.bcauction.ca/open.dll/showDisplayDocument?disID=", "display ID"),
+        ("https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2", "display ID"),
+        ("https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=", "display ID"),
+        (
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&unexpected=1",
+            "unexpected query",
+        ),
     ],
 )
-def test_canonicalize_source_url_rejects_invalid_identity_urls(url: str) -> None:
-    with pytest.raises(ValueError):
+def test_canonicalize_source_url_rejects_invalid_identity_urls(url: str, error: str) -> None:
+    with pytest.raises(ValueError, match=error):
         canonicalize_source_url(url)

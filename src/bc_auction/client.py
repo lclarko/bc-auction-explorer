@@ -1,3 +1,4 @@
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -297,7 +298,8 @@ class AuctionClient:
         if retry_after is None:
             return None
         try:
-            return max(0.0, float(retry_after))
+            retry_after_seconds = float(retry_after)
+            return max(0.0, retry_after_seconds) if math.isfinite(retry_after_seconds) else None
         except ValueError:
             try:
                 retry_after_at = parsedate_to_datetime(retry_after)

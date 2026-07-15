@@ -37,15 +37,15 @@ def canonicalize_source_url(url: str) -> str:
     parsed = urlsplit(normalized_url)
     if parsed.scheme.casefold() != "https" or parsed.netloc.casefold() != "www.bcauction.ca":
         raise ValueError("canonical item URL did not use the BC Auction HTTPS host")
-    if not parsed.path.casefold().endswith("/showdisplaydocument"):
+    if parsed.path.casefold() != "/open.dll/showdisplaydocument":
         raise ValueError("canonical item URL did not use showDisplayDocument")
 
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     unexpected_names = {name for name, _ in query_pairs} - _ITEM_QUERY_NAMES
     if unexpected_names:
         raise ValueError("canonical item URL contained unexpected query parameters")
-    display_ids = [value for name, value in query_pairs if name == "disID" and value]
-    if len(display_ids) != 1:
+    display_ids = [value for name, value in query_pairs if name == "disID"]
+    if len(display_ids) != 1 or not display_ids[0]:
         raise ValueError("canonical item URL did not contain a display ID")
     return urlunsplit(
         (

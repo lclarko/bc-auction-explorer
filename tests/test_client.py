@@ -378,6 +378,29 @@ def test_client_honors_the_full_retry_after_delay(monkeypatch) -> None:
     assert delays == [30.0]
 
 
+def test_client_falls_back_when_retry_after_is_not_finite(monkeypatch) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, headers={"retry-after": "inf"}, request=request)
+        return httpx.Response(200, content=b"<html>recovered</html>", request=request)
+
+    monkeypatch.setattr(client_module.time, "sleep", delays.append)
+    with AuctionClient(
+        min_request_interval=0,
+        max_retries=1,
+        retry_backoff=0.5,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        client.get("/retries")
+
+    assert delays == [0.5]
+
+
 def test_client_does_not_retry_an_ordinary_server_error() -> None:
     attempts = 0
 
