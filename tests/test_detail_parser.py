@@ -17,7 +17,7 @@ def _detail() -> str:
     return _FIXTURE.read_text()
 
 
-def test_parses_captured_item_detail() -> None:
+def test_parses_captured_titleless_item_detail() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
 
     assert detail.source_id == "A277437"

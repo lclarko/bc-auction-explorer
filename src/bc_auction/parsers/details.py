@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup, Tag
+from bs4.element import NavigableString
 from pydantic import HttpUrl, TypeAdapter
 
 from bc_auction.errors import ParserContractError
@@ -16,7 +17,7 @@ _HTTP_URL = TypeAdapter(HttpUrl)
 
 def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
     soup = BeautifulSoup(html, "lxml")
-    _require_title(soup)
+    _validate_page_identity(soup)
 
     source_id = _label_value(soup, "Auction Number:")
     if not source_id:
@@ -35,7 +36,10 @@ def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
         category_raw=_text(soup.select_one("td.doc_subUserDocTitle")) or None,
         location_raw=_label_value(soup, "Location:") or None,
         pickup_details=_section_text(soup, "Shipping Details:"),
-        current_bid=_parse_decimal(_label_value(soup, "Current High Bid:"), "current high bid"),
+        current_bid=_parse_decimal(
+            _current_bid_value(soup),
+            "current high bid",
+        ),
         minimum_bid=_parse_decimal(_input_value(soup, "MinimumBid"), "minimum bid"),
         bid_count=_parse_int(_label_value(soup, "Number Of Bids:"), "bid count"),
         closing_at=closing_at,
@@ -75,13 +79,24 @@ def reconcile_search_result(
     )
 
 
-def _require_title(soup: BeautifulSoup) -> None:
+def _validate_page_identity(soup: BeautifulSoup) -> None:
     title = _text(soup.title)
-    if title != "Document Summary":
+    if title and title != "Document Summary":
         raise ParserContractError("response was not a BC Auction item detail page")
+    if not _text(soup.select_one("td.doc_userDocTitle")):
+        raise ParserContractError("auction detail did not contain a document title")
+    if not _input_value(soup, "AuctionNo"):
+        raise ParserContractError("auction detail did not contain an auction number input")
+    if _label_cell(soup, "Auction Number:") is None:
+        raise ParserContractError("auction detail did not contain an auction number")
 
 
 def _label_value(soup: BeautifulSoup, label: str) -> str:
+    value_cell = _label_cell(soup, label)
+    return _text(value_cell)
+
+
+def _label_cell(soup: BeautifulSoup, label: str) -> Tag | None:
     for label_cell in soup.select("td.doc_labelColour, td.doc_tableHeader"):
         if _text(label_cell) != label:
             continue
@@ -92,9 +107,21 @@ def _label_value(soup: BeautifulSoup, label: str) -> str:
         for cell in reversed(direct_cells):
             if cell is label_cell:
                 continue
-            value = _text(cell)
-            if value:
-                return value
+            if _text(cell):
+                return cell
+    return None
+
+
+def _current_bid_value(soup: BeautifulSoup) -> str:
+    value_cell = _label_cell(soup, "Current High Bid:")
+    if value_cell is None:
+        return ""
+    for child in value_cell.children:
+        if not isinstance(child, NavigableString):
+            continue
+        value = _normalize_text(str(child))
+        if value:
+            return value
     return ""
 
 
