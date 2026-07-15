@@ -142,10 +142,10 @@ def _parse_record(link: Tag, columns: _ResultColumnMap, base_url: str) -> Search
         raise ParserContractError("auction summary row did not contain a valid auction number")
 
     detail_row = summary_row.find_next_sibling("tr")
-    if not isinstance(detail_row, Tag):
+    if not isinstance(detail_row, Tag) and columns.title_in_detail:
         raise ParserContractError("auction summary row did not have a detail row")
-    detail_cells = _content_cells(detail_row)
-    if len(detail_cells) != columns.detail_cell_count:
+    detail_cells = _content_cells(detail_row) if isinstance(detail_row, Tag) else ()
+    if columns.title_in_detail and len(detail_cells) != columns.detail_cell_count:
         raise ParserContractError("auction detail row did not have the expected content cells")
 
     title: str | None = None
@@ -188,22 +188,24 @@ def _parse_record(link: Tag, columns: _ResultColumnMap, base_url: str) -> Search
 
 
 def _item_links(soup: BeautifulSoup, columns: _ResultColumnMap) -> list[Tag]:
-    groups: dict[int, list[Tag]] = {}
+    item_links: list[Tag] = []
+    seen_summary_rows: set[int] = set()
     for link in soup.select("a.searchResultsBodyLink"):
-        summary_row = _summary_row(link, columns)
-        parent = summary_row.parent
-        if not isinstance(parent, Tag) or parent.name != "table":
-            raise ParserContractError("auction summary row did not belong to a table")
-        groups.setdefault(id(parent), []).append(link)
+        try:
+            summary_row = _summary_row(link, columns)
+        except ParserContractError:
+            # The live closed-results layout also uses this class for links in
+            # the expanded detail row. Only links in a summary-shaped row are
+            # auction-record candidates.
+            continue
+        if id(summary_row) in seen_summary_rows:
+            continue
+        seen_summary_rows.add(id(summary_row))
+        item_links.append(link)
 
-    complete_groups = [
-        links
-        for links in groups.values()
-        if all(_summary_row(link, columns).find_next_sibling("tr") is not None for link in links)
-    ]
-    if not complete_groups:
-        raise ParserContractError("results page did not contain a complete auction row group")
-    return max(complete_groups, key=len)
+    if not item_links:
+        raise ParserContractError("results page did not contain auction summary rows")
+    return item_links
 
 
 def _summary_row(link: Tag, columns: _ResultColumnMap) -> Tag:

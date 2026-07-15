@@ -85,6 +85,47 @@ def test_parses_closed_results_without_a_listing_title() -> None:
     assert str(record.canonical_source_url).endswith("showDisplayDocument?disID=999")
 
 
+def test_ignores_non_summary_detail_links() -> None:
+    html = _fixture("results-closed.html").replace(
+        "</table>\n      <table>",
+        """        <tr>
+          <td class="searchResultsBody"></td>
+          <td class="searchResultsBody">
+            <a class="searchResultsBodyLink"
+               href="javascript:openWindow('showDisplayDocument?sessionID=SESSION_ID&amp;disID=998')">View</a>
+          </td>
+          <td class="searchResultsBody"></td>
+          <td class="searchResultsBody"></td>
+          <td class="searchResultsBody"></td>
+        </tr>
+      </table>
+      <table>""",
+        1,
+    )
+
+    page = parse_search_results(html, _RESULTS_URL)
+
+    assert [record.source_id for record in page.records] == ["A000001"]
+
+
+def test_parses_closed_result_without_an_expanded_detail_row() -> None:
+    html = _fixture("results-closed.html").replace(
+        """        <tr>
+          <td class="searchResultsBodyCyan"></td>
+          <td class="searchResultsBodyCyan"></td>
+"""
+        + '          <td class="searchResultsBodyCyan">'
+        + "Closed listing detail is not titled in the results row.</td>\n"
+        + """        </tr>
+""",
+        "",
+    )
+
+    page = parse_search_results(html, _RESULTS_URL)
+
+    assert page.records[0].detail_text == ""
+
+
 def test_recognizes_the_withdrawn_result_icon() -> None:
     html = _fixture("results-closed.html").replace(
         "ClosedDocSearch1.gif",

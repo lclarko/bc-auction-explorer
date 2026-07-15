@@ -113,6 +113,7 @@ def reconcile_search_result(
     if search_result.source_id != detail.source_id:
         raise ParserContractError("search result and detail page had different auction numbers")
 
+    status_raw, status = _reconciled_status(search_result, detail)
     return detail.model_copy(
         update={
             "canonical_source_url": search_result.canonical_source_url,
@@ -124,14 +125,22 @@ def reconcile_search_result(
             "closing_at": (
                 detail.closing_at if detail.closing_at is not None else search_result.closing_at
             ),
-            "status_raw": detail.status_raw or search_result.status_raw,
-            "status": (
-                detail.status
-                if detail.status is not AuctionStatus.UNKNOWN
-                else search_result.status
-            ),
+            "status_raw": status_raw,
+            "status": status,
         }
     )
+
+
+def _reconciled_status(
+    search_result: SearchResultRecord,
+    detail: AuctionDetailRecord,
+) -> tuple[str | None, AuctionStatus]:
+    """Prefer an explicit terminal result-row state over legacy detail form state."""
+    if search_result.status in {AuctionStatus.CLOSED, AuctionStatus.WITHDRAWN}:
+        return search_result.status_raw, search_result.status
+    if detail.status is not AuctionStatus.UNKNOWN:
+        return detail.status_raw, detail.status
+    return search_result.status_raw, search_result.status
 
 
 def _validate_page_identity(soup: BeautifulSoup) -> None:

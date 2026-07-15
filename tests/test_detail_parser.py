@@ -85,6 +85,25 @@ def test_reconciles_same_auction_with_detail_title_authoritative() -> None:
     assert reconciled.title == detail.title
 
 
+def test_reconciliation_preserves_a_terminal_search_status() -> None:
+    detail = parse_item_detail(_detail(), _DETAIL_URL)
+    search_result = SearchResultRecord(
+        request_url=(
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=8733643"
+        ),
+        source_id=detail.source_id,
+        canonical_source_url="https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
+        title=None,
+        status_raw="ClosedDocSearch1.gif",
+        status=AuctionStatus.CLOSED,
+    )
+
+    reconciled = reconcile_search_result(search_result, detail)
+
+    assert reconciled.status_raw == "ClosedDocSearch1.gif"
+    assert reconciled.status is AuctionStatus.CLOSED
+
+
 def test_rejects_mismatched_search_and_detail_ids() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
     search_result = SearchResultRecord(
