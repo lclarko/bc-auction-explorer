@@ -26,6 +26,7 @@ class SearchForm:
     action_url: str
     fields: tuple[tuple[str, str], ...]
     session_id: str
+    display_orders: tuple[str, ...]
 
     def open_auction_fields(
         self,
@@ -33,6 +34,10 @@ class SearchForm:
         keyword: str = "",
         display_order: str = "EndingFirst",
     ) -> tuple[tuple[str, str], ...]:
+        if display_order not in self.display_orders:
+            raise ParserContractError(
+                f"auction search form did not permit display order: {display_order}"
+            )
         replacements = {
             "Keyword": keyword,
             "display_order": display_order,
@@ -97,11 +102,13 @@ def parse_search_form(html: str, page_url: str) -> SearchForm:
     session_id = next(value for name, value in fields if name == "sessionID")
     if not session_id:
         raise ParserContractError("auction search form had an empty session ID")
+    display_orders = _display_orders(form)
 
     return SearchForm(
         action_url=urljoin(page_url, action),
         fields=fields,
         session_id=session_id,
+        display_orders=display_orders,
     )
 
 
@@ -115,6 +122,21 @@ def _form_fields(form: Tag) -> tuple[tuple[str, str], ...]:
     return tuple(fields)
 
 
+def _display_orders(form: Tag) -> tuple[str, ...]:
+    display_order = form.find("select", attrs={"name": "display_order"})
+    if not isinstance(display_order, Tag):
+        raise ParserContractError("auction search form did not contain display-order options")
+
+    options = tuple(
+        value
+        for option in display_order.find_all("option")
+        if (value := _option_value(option))
+    )
+    if not options:
+        raise ParserContractError("auction search form did not contain display-order options")
+    return options
+
+
 def _control_value(control: Tag) -> str:
     if control.name != "select":
         value = control.get("value")
@@ -125,5 +147,9 @@ def _control_value(control: Tag) -> str:
     option = selected or (options[0] if options else None)
     if option is None:
         return ""
+    return _option_value(option)
+
+
+def _option_value(option: Tag) -> str:
     value = option.get("value")
     return value if isinstance(value, str) else option.get_text(strip=True)

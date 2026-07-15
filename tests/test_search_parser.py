@@ -42,6 +42,13 @@ def test_preserves_captured_form_fields_and_applies_open_auction_values() -> Non
     assert fields["UseProfile"] == ""
     assert fields["field_disID24"] == "4369498"
     assert fields["display_order"] == "EndingFirst"
+    assert form.display_orders == (
+        "EndingFirst",
+        "EndingLast",
+        "HighestPrice",
+        "LowestPrice",
+        "PublishDate",
+    )
 
     open_auction_fields = dict(
         form.open_auction_fields(keyword="truck", display_order="HighestPrice")
@@ -52,6 +59,9 @@ def test_preserves_captured_form_fields_and_applies_open_auction_values() -> Non
     assert open_auction_fields["dllAnchor"] == "allOpenOpportunities"
     assert open_auction_fields["productDesc"] == "Browse All Open Auctions"
     assert open_auction_fields["field_disID1"] == "5810716"
+
+    with pytest.raises(ParserContractError, match="did not permit display order"):
+        form.open_auction_fields(display_order="UncapturedSort")
 
 
 def test_rejects_a_search_form_that_is_not_posted() -> None:

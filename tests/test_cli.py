@@ -30,7 +30,12 @@ class _SuccessfulClient:
     def __exit__(self, *args: object) -> None:
         return None
 
-    def search_open_auctions(self) -> FetchedPage:
+    def search_open_auctions(
+        self,
+        *,
+        keyword: str = "",
+        display_order: str = "EndingFirst",
+    ) -> FetchedPage:
         return _page("results-open-page-1.html", _RESULTS_URL, "text/html; charset=utf-8")
 
     def get_item_detail(self, source_url: str) -> FetchedPage:
@@ -47,11 +52,66 @@ def test_manual_scrape_prints_redacted_structured_output(monkeypatch, capsys) ->
     output = json.loads(captured.out)
     assert exit_code == 0
     assert captured.err == ""
+    assert output["summary"] == {
+        "requested_limit": 1,
+        "results_only": False,
+        "keyword": "",
+        "sort": "EndingFirst",
+        "record_count": 1,
+        "failure_count": 0,
+    }
     assert output["failures"] == []
     assert output["records"][0]["source_id"] == "A277437"
     assert "sessionID" not in output["records"][0]["canonical_source_url"]
     assert "SESSION_ID" not in output["records"][0]["canonical_source_url"]
     assert "request_url" not in output["records"][0]
+
+
+def test_manual_scrape_supports_results_only_keyword_and_sort(monkeypatch, capsys) -> None:
+    class ResultsOnlyClient(_SuccessfulClient):
+        requested_search: tuple[str, str] | None = None
+
+        def search_open_auctions(
+            self,
+            *,
+            keyword: str = "",
+            display_order: str = "EndingFirst",
+        ) -> FetchedPage:
+            type(self).requested_search = (keyword, display_order)
+            return super().search_open_auctions(keyword=keyword, display_order=display_order)
+
+        def get_item_detail(self, source_url: str) -> FetchedPage:
+            raise AssertionError("results-only scrape requested item detail")
+
+    monkeypatch.setattr(cli, "AuctionClient", ResultsOnlyClient)
+
+    exit_code = cli.main(
+        ["scrape", "--limit", "1", "--results-only", "--keyword", "truck", "--sort", "HighestPrice"]
+    )
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert exit_code == 0
+    assert captured.err == ""
+    assert ResultsOnlyClient.requested_search == ("truck", "HighestPrice")
+    assert output["summary"]["results_only"] is True
+    assert output["summary"]["keyword"] == "truck"
+    assert output["summary"]["sort"] == "HighestPrice"
+    assert output["failures"] == []
+    assert "content_hash" not in output["records"][0]
+
+
+def test_manual_scrape_writes_atomic_json_output(monkeypatch, capsys, tmp_path: Path) -> None:
+    monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
+    output_path = tmp_path / "scrape.json"
+
+    exit_code = cli.main(["scrape", "--limit", "1", "--output", str(output_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert json.loads(output_path.read_text(encoding="utf-8")) == json.loads(captured.out)
+    assert list(tmp_path.glob(".scrape.json.*")) == []
 
 
 def test_manual_scrape_reports_detail_parser_failures(monkeypatch, capsys) -> None:
@@ -101,7 +161,12 @@ def test_collect_search_records_follows_pagination() -> None:
 
 def test_manual_scrape_returns_one_when_search_enumeration_fails(monkeypatch, capsys) -> None:
     class FailingSearchClient(_SuccessfulClient):
-        def search_open_auctions(self) -> FetchedPage:
+        def search_open_auctions(
+            self,
+            *,
+            keyword: str = "",
+            display_order: str = "EndingFirst",
+        ) -> FetchedPage:
             raise ParserContractError("invalid search results")
 
     monkeypatch.setattr(cli, "AuctionClient", FailingSearchClient)

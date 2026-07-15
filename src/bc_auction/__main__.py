@@ -1,8 +1,11 @@
 import argparse
 import json
+import os
 import re
 import sys
-from collections.abc import Sequence
+import tempfile
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 import httpx
 
@@ -18,6 +21,7 @@ from bc_auction.parsers import (
 
 _SESSION_ID = re.compile(r"(?i)(sessionID=)[^&\s'\"<>]+")
 _MAX_SEARCH_PAGES = 100
+_ScrapeRecord = SearchResultRecord | AuctionDetailRecord
 
 
 def _positive_int(value: str) -> int:
@@ -27,8 +31,14 @@ def _positive_int(value: str) -> int:
     return parsed_value
 
 
-def _collect_search_records(client: AuctionClient, limit: int) -> tuple[SearchResultRecord, ...]:
-    page = client.search_open_auctions()
+def _collect_search_records(
+    client: AuctionClient,
+    limit: int,
+    *,
+    keyword: str = "",
+    display_order: str = "EndingFirst",
+) -> tuple[SearchResultRecord, ...]:
+    page = client.search_open_auctions(keyword=keyword, display_order=display_order)
     tracker = SearchPageTracker()
     records: list[SearchResultRecord] = []
     visited_page_urls: set[str] = set()
@@ -71,10 +81,23 @@ def _collect_search_records(client: AuctionClient, limit: int) -> tuple[SearchRe
 def scrape(
     client: AuctionClient,
     limit: int,
-) -> tuple[list[AuctionDetailRecord], list[dict[str, str]]]:
-    records: list[AuctionDetailRecord] = []
+    *,
+    keyword: str = "",
+    display_order: str = "EndingFirst",
+    results_only: bool = False,
+) -> tuple[list[_ScrapeRecord], list[dict[str, str]]]:
+    search_records = _collect_search_records(
+        client,
+        limit,
+        keyword=keyword,
+        display_order=display_order,
+    )
+    if results_only:
+        return list(search_records), []
+
+    records: list[_ScrapeRecord] = []
     failures: list[dict[str, str]] = []
-    for search_result in _collect_search_records(client, limit):
+    for search_result in search_records:
         try:
             detail_page = client.get_item_detail(str(search_result.request_url))
             detail = parse_item_detail(detail_page.decode().text, detail_page.url)
@@ -99,7 +122,39 @@ def _build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     scrape_command = commands.add_parser("scrape")
     scrape_command.add_argument("--limit", type=_positive_int, default=20)
+    scrape_command.add_argument("--output", type=Path)
+    scrape_command.add_argument("--results-only", action="store_true")
+    scrape_command.add_argument("--keyword", default="")
+    scrape_command.add_argument("--sort", dest="display_order", default="EndingFirst")
     return parser
+
+
+def _write_output(output_path: Path | None, output: Mapping[str, object]) -> None:
+    serialized = json.dumps(output, indent=2)
+    if output_path is not None:
+        _write_output_atomically(output_path, serialized)
+    print(serialized)
+
+
+def _write_output_atomically(output_path: Path, serialized: str) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output_path.parent,
+            prefix=f".{output_path.name}.",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(f"{serialized}\n")
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, output_path)
+    except OSError:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -109,16 +164,30 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         with AuctionClient() as client:
-            records, failures = scrape(client, args.limit)
-    except (ScraperError, httpx.HTTPError, ValueError) as exc:
+            records, failures = scrape(
+                client,
+                args.limit,
+                keyword=args.keyword,
+                display_order=args.display_order,
+                results_only=args.results_only,
+            )
+        output = {
+            "summary": {
+                "requested_limit": args.limit,
+                "results_only": args.results_only,
+                "keyword": args.keyword,
+                "sort": args.display_order,
+                "record_count": len(records),
+                "failure_count": len(failures),
+            },
+            "records": [record.model_dump(mode="json") for record in records],
+            "failures": failures,
+        }
+        _write_output(args.output, output)
+    except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
 
-    output = {
-        "records": [record.model_dump(mode="json") for record in records],
-        "failures": failures,
-    }
-    print(json.dumps(output, indent=2))
     if failures:
         print(f"{len(failures)} listing failures", file=sys.stderr)
         return 2
