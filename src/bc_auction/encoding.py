@@ -49,15 +49,15 @@ def _encoding_candidates(body: bytes, content_type: str | None) -> tuple[str, ..
         candidates.append(bom_encoding)
 
     if content_type:
-        match = _CHARSET_HEADER.search(content_type)
-        if match:
-            candidates.append(match.group(1))
+        header_match = _CHARSET_HEADER.search(content_type)
+        if header_match:
+            candidates.append(header_match.group(1))
 
     sample = body[:4096]
     for pattern in (_META_CHARSET, _META_HTTP_EQUIV):
-        match = pattern.search(sample)
-        if match:
-            candidates.append(match.group(1).decode("ascii", errors="ignore"))
+        meta_match = pattern.search(sample)
+        if meta_match:
+            candidates.append(meta_match.group(1).decode("ascii", errors="ignore"))
 
     candidates.extend(("utf-8", "windows-1252"))
 
