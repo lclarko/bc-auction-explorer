@@ -1,0 +1,146 @@
+{
+  "version": 1,
+  "fixtures": {
+    "item-detail-frame.html": {
+      "capture": "item-detail",
+      "route": "/open.dll/showDisplayDocument",
+      "captured_at": "2026-07-15T03:41:45Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": ["session IDs replaced", "frame contract retained"],
+      "source_sha256": "d26e092b9ba76d1b34a1bfb5f5f537db354d1b368f8c076a692bca92fb0e96f3"
+    },
+    "item-detail-working.html": {
+      "capture": "item-detail-content",
+      "route": "/open.dll/showWorking",
+      "captured_at": "2026-07-15T03:44:54Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": ["session IDs replaced", "working-page contract retained"],
+      "source_sha256": "2f7ae86f5adf2eb1227522a4749ce55175a7f48557662b465ecf3e2deaa4bbac"
+    },
+    "item-detail.html": {
+      "capture": "item-detail-summary",
+      "route": "/open.dll/showDocSummary",
+      "captured_at": "2026-07-15T03:45:27Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": [
+        "session IDs replaced",
+        "listing title replaced",
+        "contact and payment content removed",
+        "detail values are synthetic"
+      ],
+      "source_sha256": "fec1f47231de5289a6258b2573050886d2405c4fd6e2156ff3343e88427ce3b6"
+    },
+    "results-closed.html": {
+      "capture": "search-results-closed",
+      "route": "/open.dll/submitDocSearch",
+      "captured_at": "2026-07-15T03:42:34Z",
+      "source_content_type": "text/html",
+      "declared_charset": "iso-8859-1",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": ["session IDs replaced", "single structural row synthesized"],
+      "source_sha256": "e61d0f6b44d2f4c6395aac271877c952eb269e2574626b68b3d64002cc194213"
+    },
+    "results-empty.html": {
+      "capture": "search-results-empty",
+      "route": "/open.dll/submitDocSearch",
+      "captured_at": "2026-07-15T04:06:24Z",
+      "source_content_type": "text/html",
+      "declared_charset": "iso-8859-1",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "complete",
+      "sanitization": ["session IDs replaced", "stored as UTF-8"],
+      "source_sha256": "c89db4b3d440d45632fa0de15b80a4d2317941719df82577f70f4f229f427817"
+    },
+    "results-open-highest-price.html": {
+      "capture": "search-results-sorted",
+      "route": "/open.dll/submitDocSearch",
+      "captured_at": "2026-07-15T03:41:29Z",
+      "source_content_type": "text/html",
+      "declared_charset": "iso-8859-1",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "complete",
+      "sanitization": ["session IDs replaced", "listing titles replaced", "bid amounts replaced"],
+      "source_sha256": "0456a68a2cc0edd845afc016a93f9e02aec679b83eec0dd82b831e37930b4b77"
+    },
+    "results-open-page-1.html": {
+      "capture": "search-results-1",
+      "route": "/open.dll/submitDocSearch",
+      "captured_at": "2026-07-15T03:40:08Z",
+      "source_content_type": "text/html",
+      "declared_charset": "iso-8859-1",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "complete",
+      "sanitization": ["session IDs replaced", "listing titles replaced", "bid amounts replaced"],
+      "source_sha256": "b0321ad55f9def3bb93036181931c1706e94f838968810589df110c65a0d0bc8"
+    },
+    "results-open-page-2.html": {
+      "capture": "search-results-2",
+      "route": "/open.dll/submitDocSearch",
+      "captured_at": "2026-07-15T03:41:15Z",
+      "source_content_type": "text/html",
+      "declared_charset": "iso-8859-1",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "complete",
+      "sanitization": ["session IDs replaced", "listing titles replaced", "bid amounts replaced"],
+      "source_sha256": "fc5aa3bac5f4787e9c08878ab65a617f7625c654ea815e9aa7077624b4345517"
+    },
+    "search-entry.html": {
+      "capture": "search-entry",
+      "route": "/open.dll/showDocumentSearch",
+      "captured_at": "2026-07-15T03:39:37Z",
+      "source_content_type": "text/html",
+      "declared_charset": "iso-8859-1",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "complete",
+      "sanitization": ["session IDs replaced", "stored as UTF-8"],
+      "source_sha256": "d55ef50ab8586db6b0c7b9bee3782a6ebfd9dd4bf3a886ab3181f2e0915b1ee3"
+    },
+    "welcome-content.html": {
+      "capture": "welcome-content-auth",
+      "route": "/open.dll/showWelcomeContent",
+      "captured_at": "2026-07-15T03:39:12Z",
+      "source_content_type": "text/html",
+      "declared_charset": "windows-1252",
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "reduced",
+      "sanitization": [
+        "session IDs replaced",
+        "navigation-only reduction",
+        "contact and payment content removed"
+      ],
+      "source_sha256": "2e69e5a5de0aba1ca3c3601754635fcb8bef4e06c9785310f580b0665d35d850"
+    },
+    "welcome.html": {
+      "capture": "welcome-main",
+      "route": "/open.dll/welcome?language=En",
+      "captured_at": "2026-07-15T03:37:24Z",
+      "source_content_type": "text/html",
+      "declared_charset": null,
+      "decoded_as": "windows-1252",
+      "stored_encoding": "utf-8",
+      "scope": "complete",
+      "sanitization": ["session IDs replaced", "stored as UTF-8"],
+      "source_sha256": "ce4eb81c1ff2fe87ccfcb02774b6279a8d54e9d997b953c863037995e3946c2a"
+    }
+  }
+}
