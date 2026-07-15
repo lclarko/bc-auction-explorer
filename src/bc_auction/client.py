@@ -35,14 +35,19 @@ class AuctionClient:
         base_url: str = "https://www.bcauction.ca/",
         min_request_interval: float = 1.5,
         timeout: float = 20.0,
+        max_redirects: int = 10,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        if max_redirects < 0:
+            raise ValueError("max_redirects must be non-negative")
+
         self._base_url = base_url
         self._base_host = urlparse(base_url).netloc.casefold()
         self._min_request_interval = min_request_interval
         self._last_request_started: float | None = None
+        self._max_redirects = max_redirects
         self._client = httpx.Client(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=timeout,
             transport=transport,
             headers={
@@ -115,29 +120,69 @@ class AuctionClient:
     ) -> FetchedPage:
         url = urljoin(self._base_url, path_or_url)
         self._check_host(url)
-        self._wait_for_request_slot()
+        request_method = method
+        request_data = data
+        redirects_followed = 0
+        visited_requests = {(request_method, url)}
 
+        while True:
+            self._wait_for_request_slot()
+            response = self._send_request(request_method, url, request_data)
+            self._check_host(str(response.url))
+
+            if not response.is_redirect:
+                response.raise_for_status()
+                return FetchedPage(
+                    url=str(response.url),
+                    status_code=response.status_code,
+                    body=response.content,
+                    content_type=response.headers.get("content-type"),
+                    fetched_at=datetime.now(UTC),
+                )
+
+            if redirects_followed >= self._max_redirects:
+                raise ValueError("redirect limit exceeded")
+
+            location = response.headers.get("location")
+            if location is None:
+                raise ValueError("redirect response did not contain a Location header")
+            redirect_url = urljoin(str(response.url), location)
+            self._check_host(redirect_url)
+
+            redirect_method = self._redirect_method(request_method, response.status_code)
+            redirect_data = request_data if redirect_method == request_method else None
+            request_key = (redirect_method, redirect_url)
+            if request_key in visited_requests:
+                raise ValueError("redirect loop detected")
+
+            redirects_followed += 1
+            visited_requests.add(request_key)
+            request_method = redirect_method
+            request_data = redirect_data
+            url = redirect_url
+
+    def _send_request(
+        self,
+        method: str,
+        url: str,
+        data: Sequence[tuple[str, str]] | None,
+    ) -> httpx.Response:
         if data is None:
-            response = self._client.request(method, url)
-        else:
-            response = self._client.request(
-                method,
-                url,
-                content=urlencode(data),
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-        for redirect in response.history:
-            self._check_host(str(redirect.url))
-        self._check_host(str(response.url))
-        response.raise_for_status()
-
-        return FetchedPage(
-            url=str(response.url),
-            status_code=response.status_code,
-            body=response.content,
-            content_type=response.headers.get("content-type"),
-            fetched_at=datetime.now(UTC),
+            return self._client.request(method, url)
+        return self._client.request(
+            method,
+            url,
+            content=urlencode(data),
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
+
+    @staticmethod
+    def _redirect_method(method: str, status_code: int) -> str:
+        if status_code in {httpx.codes.SEE_OTHER, httpx.codes.FOUND} and method != "HEAD":
+            return "GET"
+        if status_code == httpx.codes.MOVED_PERMANENTLY and method == "POST":
+            return "GET"
+        return method
 
     def _set_session_cookie(self, session_id: str, source_url: str) -> None:
         hostname = urlparse(source_url).hostname

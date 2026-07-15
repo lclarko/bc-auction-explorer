@@ -36,7 +36,10 @@ def test_client_rejects_another_host() -> None:
 
 
 def test_client_allows_same_host_redirect() -> None:
+    requested_paths: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
         if request.url.path == "/start":
             return httpx.Response(302, headers={"location": "/results"}, request=request)
         return httpx.Response(200, content=b"results", request=request)
@@ -45,10 +48,14 @@ def test_client_allows_same_host_redirect() -> None:
         page = client.get("/start")
 
     assert page.url == "https://www.bcauction.ca/results"
+    assert requested_paths == ["/start", "/results"]
 
 
-def test_client_rejects_cross_host_final_redirect() -> None:
+def test_client_rejects_cross_host_redirect_before_requesting_target() -> None:
+    requested_urls: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
         if request.url.path == "/start":
             return httpx.Response(
                 302,
@@ -61,26 +68,93 @@ def test_client_rejects_cross_host_final_redirect() -> None:
         with pytest.raises(ValueError, match="outside the configured host"):
             client.get("/start")
 
+    assert requested_urls == ["https://www.bcauction.ca/start"]
 
-def test_client_rejects_cross_host_redirect_history() -> None:
+
+def test_client_rejects_redirect_without_a_location() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host == "www.bcauction.ca" and request.url.path == "/start":
+        return httpx.Response(302, request=request)
+
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="did not contain a Location"):
+            client.get("/start")
+
+
+def test_client_rejects_redirect_loop_before_repeating_request() -> None:
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        location = "/next" if request.url.path == "/start" else "/start"
+        return httpx.Response(302, headers={"location": location}, request=request)
+
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="redirect loop detected"):
+            client.get("/start")
+
+    assert requested_paths == ["/start", "/next"]
+
+
+def test_client_rejects_redirects_beyond_limit() -> None:
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/start":
+            return httpx.Response(302, headers={"location": "/first"}, request=request)
+        return httpx.Response(302, headers={"location": "/second"}, request=request)
+
+    with AuctionClient(
+        min_request_interval=0,
+        max_redirects=1,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        with pytest.raises(ValueError, match="redirect limit exceeded"):
+            client.get("/start")
+
+    assert requested_paths == ["/start", "/first"]
+
+
+@pytest.mark.parametrize(
+    ("status_code", "expected_method"),
+    [
+        (301, "GET"),
+        (302, "GET"),
+        (303, "GET"),
+        (307, "POST"),
+        (308, "POST"),
+    ],
+)
+def test_client_preserves_post_redirect_method_semantics(
+    status_code: int,
+    expected_method: str,
+) -> None:
+    redirected_request: httpx.Request | None = None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal redirected_request
+        if request.url.path == "/start":
+            assert request.method == "POST"
+            assert request.content == b"Keyword=truck"
             return httpx.Response(
-                302,
-                headers={"location": "https://example.com/continue"},
+                status_code,
+                headers={"location": "/results"},
                 request=request,
             )
-        if request.url.host == "example.com":
-            return httpx.Response(
-                302,
-                headers={"location": "https://www.bcauction.ca/results"},
-                request=request,
-            )
+        redirected_request = request
         return httpx.Response(200, request=request)
 
     with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
-        with pytest.raises(ValueError, match="outside the configured host"):
-            client.get("/start")
+        client.post_form("/start", (("Keyword", "truck"),))
+
+    assert redirected_request is not None
+    assert redirected_request.method == expected_method
+    if expected_method == "GET":
+        assert redirected_request.content == b""
+        assert "content-type" not in redirected_request.headers
+    else:
+        assert redirected_request.content == b"Keyword=truck"
+        assert redirected_request.headers["content-type"] == "application/x-www-form-urlencoded"
 
 
 def test_client_submits_open_auction_search() -> None:
@@ -120,7 +194,10 @@ def test_client_submits_open_auction_search() -> None:
 
 
 def test_client_rejects_cross_host_post_redirect() -> None:
+    requested_hosts: list[str] = []
+
     def handler(request: httpx.Request) -> httpx.Response:
+        requested_hosts.append(request.url.host)
         if request.url.host == "www.bcauction.ca":
             return httpx.Response(
                 302,
@@ -132,6 +209,8 @@ def test_client_rejects_cross_host_post_redirect() -> None:
     with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(ValueError, match="outside the configured host"):
             client.post_form("/open.dll/submitDocSearch", (("Keyword", "truck"),))
+
+    assert requested_hosts == ["www.bcauction.ca"]
 
 
 def test_client_follows_item_detail_frames() -> None:
