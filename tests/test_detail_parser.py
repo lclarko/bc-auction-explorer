@@ -67,6 +67,21 @@ def test_reconciles_search_and_detail_values() -> None:
     assert reconciled.location_raw == "Kelowna"
 
 
+def test_reconciles_same_auction_with_detail_title_authoritative() -> None:
+    detail = parse_item_detail(_detail(), _DETAIL_URL)
+    search_result = SearchResultRecord(
+        source_url=(
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?sessionID=SESSION_ID&disID=8733643"
+        ),
+        source_id=detail.source_id,
+        title="2011 Ford F150",
+    )
+
+    reconciled = reconcile_search_result(search_result, detail)
+
+    assert reconciled.title == detail.title
+
+
 def test_rejects_mismatched_search_and_detail_ids() -> None:
     detail = parse_item_detail(_detail(), _DETAIL_URL)
     search_result = SearchResultRecord(
@@ -84,6 +99,58 @@ def test_rejects_cross_host_image_urls() -> None:
 
     with pytest.raises(ParserContractError, match="configured host"):
         parse_item_detail(html, _DETAIL_URL)
+
+
+def test_deduplicates_image_urls_while_preserving_order() -> None:
+    html = _detail().replace(
+        '    <img src="/Pictures/8733643_Small4.jpg">',
+        """    <img src="/Pictures/8733643_Small4.jpg">
+    <img src="/Pictures/8733643_Main.jpg">
+    <img src="https://www.bcauction.ca/Pictures/8733643_Small1.jpg">
+    <img src="/Pictures/8733643_Small4.jpg">""",
+    )
+
+    detail = parse_item_detail(html, _DETAIL_URL)
+
+    assert [str(image_url) for image_url in detail.image_urls] == [
+        "https://www.bcauction.ca/Pictures/8733643_Main.jpg",
+        "https://www.bcauction.ca/Pictures/8733643_Small1.jpg",
+        "https://www.bcauction.ca/Pictures/8733643_Small2.jpg",
+        "https://www.bcauction.ca/Pictures/8733643_Small3.jpg",
+        "https://www.bcauction.ca/Pictures/8733643_Small4.jpg",
+    ]
+
+
+def test_detail_hash_ignores_session_id_in_the_page_url() -> None:
+    original = parse_item_detail(_detail(), _DETAIL_URL)
+    changed_session = parse_item_detail(
+        _detail(),
+        _DETAIL_URL.replace("SESSION_ID", "DIFFERENT_SESSION"),
+    )
+
+    assert changed_session.content_hash == original.content_hash
+
+
+def test_detail_hash_ignores_irrelevant_markup() -> None:
+    html_with_navigation = _detail().replace(
+        "<body>",
+        "<body><nav>sessionID=DIFFERENT_SESSION navigation text</nav>",
+    )
+
+    original = parse_item_detail(_detail(), _DETAIL_URL)
+    changed_markup = parse_item_detail(html_with_navigation, _DETAIL_URL)
+
+    assert changed_markup.content_hash == original.content_hash
+
+
+def test_detail_hash_changes_when_meaningful_auction_data_changes() -> None:
+    original = parse_item_detail(_detail(), _DETAIL_URL)
+    changed_bid = parse_item_detail(
+        _detail().replace("1000.00<img", "1100.00<img"),
+        _DETAIL_URL,
+    )
+
+    assert changed_bid.content_hash != original.content_hash
 
 
 def test_rejects_a_detail_without_an_auction_number() -> None:

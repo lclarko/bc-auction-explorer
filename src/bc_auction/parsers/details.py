@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -33,25 +34,47 @@ def parse_item_detail(html: str, page_url: str) -> AuctionDetailRecord:
         _label_value(soup, "Time Zone:"),
     )
     status_raw, status = _parse_status(soup)
+    title = _required_text(soup.select_one("td.doc_userDocTitle"), "title")
+    description = _section_text(soup, "Auction Details:")
+    category_raw = _text(soup.select_one("td.doc_subUserDocTitle")) or None
+    location_raw = _label_value(soup, "Location:") or None
+    pickup_details = _section_text(soup, "Shipping Details:")
+    current_bid = _parse_decimal(
+        _current_bid_value(soup),
+        "current high bid",
+    )
+    minimum_bid = _parse_decimal(_input_value(soup, "MinimumBid"), "minimum bid")
+    bid_count = _parse_int(_label_value(soup, "Number Of Bids:"), "bid count")
+    image_urls = _image_urls(soup, page_url)
     return AuctionDetailRecord(
         source_url=_HTTP_URL.validate_python(page_url),
         source_id=source_id,
-        title=_required_text(soup.select_one("td.doc_userDocTitle"), "title"),
-        description=_section_text(soup, "Auction Details:"),
-        category_raw=_text(soup.select_one("td.doc_subUserDocTitle")) or None,
-        location_raw=_label_value(soup, "Location:") or None,
-        pickup_details=_section_text(soup, "Shipping Details:"),
-        current_bid=_parse_decimal(
-            _current_bid_value(soup),
-            "current high bid",
-        ),
-        minimum_bid=_parse_decimal(_input_value(soup, "MinimumBid"), "minimum bid"),
-        bid_count=_parse_int(_label_value(soup, "Number Of Bids:"), "bid count"),
+        title=title,
+        description=description,
+        category_raw=category_raw,
+        location_raw=location_raw,
+        pickup_details=pickup_details,
+        current_bid=current_bid,
+        minimum_bid=minimum_bid,
+        bid_count=bid_count,
         closing_at=closing_at,
         status_raw=status_raw,
         status=status,
-        image_urls=_image_urls(soup, page_url),
-        content_hash=_content_hash(soup),
+        image_urls=image_urls,
+        content_hash=_content_hash(
+            source_id=source_id,
+            title=title,
+            description=description,
+            category_raw=category_raw,
+            location_raw=location_raw,
+            pickup_details=pickup_details,
+            current_bid=current_bid,
+            minimum_bid=minimum_bid,
+            bid_count=bid_count,
+            closing_at=closing_at,
+            status=status,
+            image_urls=image_urls,
+        ),
     )
 
 
@@ -88,8 +111,6 @@ def reconcile_search_result(
 ) -> AuctionDetailRecord:
     if search_result.source_id != detail.source_id:
         raise ParserContractError("search result and detail page had different auction numbers")
-    if _normalize_text(search_result.title) != _normalize_text(detail.title):
-        raise ParserContractError("search result and detail page had different titles")
 
     return detail.model_copy(
         update={
@@ -231,20 +252,60 @@ def _parse_int(value: str, field_name: str) -> int | None:
 
 def _image_urls(soup: BeautifulSoup, page_url: str) -> tuple[HttpUrl, ...]:
     image_urls: list[HttpUrl] = []
+    seen_urls: set[str] = set()
     page_host = urlparse(page_url).netloc.casefold()
     for image in soup.select('img[src*="Pictures/"]'):
         image_url = urljoin(page_url, str(image["src"]))
         if urlparse(image_url).netloc.casefold() != page_host:
             raise ParserContractError("auction detail image URL left the configured host")
-        image_urls.append(_HTTP_URL.validate_python(image_url))
+        validated_url = _HTTP_URL.validate_python(image_url)
+        normalized_url = str(validated_url)
+        if normalized_url in seen_urls:
+            continue
+        seen_urls.add(normalized_url)
+        image_urls.append(validated_url)
     return tuple(image_urls)
 
 
-def _content_hash(soup: BeautifulSoup) -> str:
-    normalized = BeautifulSoup(str(soup), "lxml")
-    for node in normalized.select("script, style"):
-        node.decompose()
-    return hashlib.sha256(_normalize_text(_text(normalized)).encode()).hexdigest()
+def _content_hash(
+    *,
+    source_id: str,
+    title: str,
+    description: str | None,
+    category_raw: str | None,
+    location_raw: str | None,
+    pickup_details: str | None,
+    current_bid: Decimal | None,
+    minimum_bid: Decimal | None,
+    bid_count: int | None,
+    closing_at: datetime | None,
+    status: AuctionStatus,
+    image_urls: tuple[HttpUrl, ...],
+) -> str:
+    payload = {
+        "source_id": _normalize_text(source_id),
+        "title": _normalize_text(title),
+        "description": _normalized_optional_text(description),
+        "category": _normalized_optional_text(category_raw),
+        "location": _normalized_optional_text(location_raw),
+        "pickup_details": _normalized_optional_text(pickup_details),
+        "current_bid": _normalized_decimal(current_bid),
+        "minimum_bid": _normalized_decimal(minimum_bid),
+        "bid_count": bid_count,
+        "closing_at": closing_at.isoformat() if closing_at is not None else None,
+        "status": status.value,
+        "image_urls": [str(image_url) for image_url in image_urls],
+    }
+    serialized = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _normalized_optional_text(value: str | None) -> str | None:
+    return _normalize_text(value) if value is not None else None
+
+
+def _normalized_decimal(value: Decimal | None) -> str | None:
+    return format(value.normalize(), "f") if value is not None else None
 
 
 def _required_text(node: Tag | None, field_name: str) -> str:
