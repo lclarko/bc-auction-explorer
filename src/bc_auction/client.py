@@ -66,6 +66,9 @@ class AuctionClient:
         self._wait_for_request_slot()
 
         response = self._client.get(url)
+        for redirect in response.history:
+            self._check_host(str(redirect.url))
+        self._check_host(str(response.url))
         response.raise_for_status()
 
         return FetchedPage(
