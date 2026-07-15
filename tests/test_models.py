@@ -32,3 +32,11 @@ def test_item_rejects_naive_datetimes() -> None:
 
     with pytest.raises(ValidationError):
         AuctionItem.model_validate(data)
+
+
+def test_item_rejects_a_non_hex_content_hash() -> None:
+    data = _item_data()
+    data["raw_content_hash"] = "G" * 64
+
+    with pytest.raises(ValidationError):
+        AuctionItem.model_validate(data)

@@ -1,3 +1,15 @@
-from bc_auction.models import AuctionItem, AuctionStatus, SearchResultRecord, SearchResultsPage
+from bc_auction.models import (
+    AuctionDetailRecord,
+    AuctionItem,
+    AuctionStatus,
+    SearchResultRecord,
+    SearchResultsPage,
+)
 
-__all__ = ["AuctionItem", "AuctionStatus", "SearchResultRecord", "SearchResultsPage"]
+__all__ = [
+    "AuctionDetailRecord",
+    "AuctionItem",
+    "AuctionStatus",
+    "SearchResultRecord",
+    "SearchResultsPage",
+]
