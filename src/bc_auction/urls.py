@@ -35,6 +35,8 @@ def canonicalize_source_url(url: str) -> str:
     """Return a stable, session-free identity URL for a BC Auction item."""
     normalized_url = normalize_public_url(url)
     parsed = urlsplit(normalized_url)
+    if parsed.scheme.casefold() != "https" or parsed.netloc.casefold() != "www.bcauction.ca":
+        raise ValueError("canonical item URL did not use the BC Auction HTTPS host")
     if not parsed.path.casefold().endswith("/showdisplaydocument"):
         raise ValueError("canonical item URL did not use showDisplayDocument")
 
@@ -42,9 +44,18 @@ def canonicalize_source_url(url: str) -> str:
     unexpected_names = {name for name, _ in query_pairs} - _ITEM_QUERY_NAMES
     if unexpected_names:
         raise ValueError("canonical item URL contained unexpected query parameters")
-    if not any(name == "disID" and value for name, value in query_pairs):
+    display_ids = [value for name, value in query_pairs if name == "disID" and value]
+    if len(display_ids) != 1:
         raise ValueError("canonical item URL did not contain a display ID")
-    return normalized_url
+    return urlunsplit(
+        (
+            "https",
+            "www.bcauction.ca",
+            "/open.dll/showDisplayDocument",
+            urlencode({"disID": display_ids[0]}),
+            "",
+        )
+    )
 
 
 def _contains_session_marker(value: str) -> bool:

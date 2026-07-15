@@ -61,21 +61,29 @@ def parse_session_id(html: str) -> str:
 
 def parse_welcome_content_url(html: str, page_url: str) -> str:
     soup = BeautifulSoup(html, "lxml")
-    for frame in soup.find_all("frame", src=True):
-        src = str(frame["src"]).strip()
-        if "showwelcomecontent" in src.casefold():
-            return urljoin(page_url, src)
-    raise ParserContractError("welcome page did not contain a content frame")
+    candidates = [
+        str(frame["src"]).strip()
+        for frame in soup.find_all("frame", src=True)
+        if "showwelcomecontent" in str(frame["src"]).casefold()
+    ]
+    if len(candidates) != 1:
+        raise ParserContractError("welcome page did not contain one content frame")
+    return urljoin(page_url, candidates[0])
 
 
 def parse_browse_url(html: str, page_url: str) -> str:
     soup = BeautifulSoup(html, "lxml")
-    for link in soup.find_all("a", href=True):
-        href = str(link["href"]).strip()
-        lowered = href.casefold()
-        if "submitlogin" in lowered and "showdocumentsearch" in lowered:
-            return urljoin(page_url, href)
-    raise ParserContractError("welcome content did not contain the auction browse link")
+    candidates = [
+        str(link["href"]).strip()
+        for link in soup.find_all("a", href=True)
+        if (
+            "submitlogin" in str(link["href"]).casefold()
+            and "showdocumentsearch" in str(link["href"]).casefold()
+        )
+    ]
+    if len(candidates) != 1:
+        raise ParserContractError("welcome content did not contain one auction browse link")
+    return urljoin(page_url, candidates[0])
 
 
 def parse_search_form(html: str, page_url: str) -> SearchForm:

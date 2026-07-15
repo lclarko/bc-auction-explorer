@@ -70,6 +70,7 @@ class AuctionClient:
             raise ValueError("max_html_bytes must be positive")
 
         self._base_url = base_url
+        self._base_scheme = parsed_base_url.scheme.casefold()
         self._base_host = parsed_base_url.netloc.casefold()
         self._min_request_interval = min_request_interval
         self._last_request_started: float | None = None
@@ -253,7 +254,11 @@ class AuctionClient:
         self._client.cookies.set("sessionID", f"|{session_id}|", domain=hostname, path="/")
 
     def _check_host(self, url: str) -> None:
-        if urlparse(url).netloc.casefold() != self._base_host:
+        parsed_url = urlparse(url)
+        if (
+            parsed_url.scheme.casefold() != self._base_scheme
+            or parsed_url.netloc.casefold() != self._base_host
+        ):
             raise ValueError("refusing to request a URL outside the configured host")
 
     def _validate_html_response(self, response: httpx.Response) -> None:
@@ -283,7 +288,7 @@ class AuctionClient:
 
     def _sleep_for_retry(self, retries_used: int, *, retry_after: float | None = None) -> None:
         bounded_backoff = min(5.0, self._retry_backoff * (2**retries_used))
-        delay = bounded_backoff if retry_after is None else min(5.0, retry_after)
+        delay = bounded_backoff if retry_after is None else retry_after
         time.sleep(delay)
 
     @staticmethod

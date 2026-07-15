@@ -18,6 +18,27 @@ def _fixture(name: str) -> str:
     return (_FIXTURES / name).read_text(encoding="utf-8")
 
 
+def _open_result_html(detail_row: str) -> str:
+    return f"""
+    <html><head><title>Browse Auctions</title></head><body>
+    <form action="submitDocSearch"><table><tr>
+    <td class="searchResultsHeader">Auction No</td>
+    <td class="searchResultsHeader">Published Date</td>
+    <td class="searchResultsHeader">Closing Date</td>
+    <td class="searchResultsHeader">High Bid</td>
+    <td class="searchResultsHeader">Location</td>
+    </tr></table><table><tr>
+    <td class="searchResultsBody"></td>
+    <td class="searchResultsBody"><a class="searchResultsBodyLink"
+    href="javascript:openWindow('showDisplayDocument?disID=1')">A000001</a></td>
+    <td class="searchResultsBody"><span class="searchResultsTitle">Listing</span></td>
+    <td class="searchResultsBody">100.00</td><td class="searchResultsBody">Victoria</td>
+    </tr>{detail_row}</table>
+    <table><tr><td class="alignCenter"><span class="boldText">1</span></td></tr></table>
+    <p>1 - 1 / 1</p></form></body></html>
+    """
+
+
 def test_parses_captured_open_results_page() -> None:
     page = parse_search_results(_fixture("results-open-page-1.html"), _RESULTS_URL)
 
@@ -154,6 +175,18 @@ def test_rejects_duplicate_source_ids() -> None:
         parse_search_results(html, _RESULTS_URL)
 
 
+@pytest.mark.parametrize(
+    "detail_row",
+    [
+        "",
+        '<tr><td class="searchResultsBody">unexpected</td></tr>',
+    ],
+)
+def test_rejects_open_results_without_a_valid_detail_row(detail_row: str) -> None:
+    with pytest.raises(ParserContractError, match="detail row"):
+        parse_search_results(_open_result_html(detail_row), _RESULTS_URL)
+
+
 def test_rejects_cross_host_detail_urls() -> None:
     html = _fixture("results-open-page-1.html").replace(
         "https://www.bcauction.ca/open.dll/showDisplayDocument",
@@ -227,3 +260,20 @@ def test_tracker_rejects_repeated_pages_and_source_ids() -> None:
 
     with pytest.raises(ParserContractError, match="duplicate search-results page"):
         tracker.add(first_page)
+
+
+def test_tracker_rejects_duplicate_source_ids_across_distinct_pages() -> None:
+    first_page = parse_search_results(_fixture("results-open-page-1.html"), _RESULTS_URL)
+    second_page = parse_search_results(_fixture("results-open-page-2.html"), _RESULTS_URL)
+    duplicate_record = second_page.records[0].model_copy(
+        update={"source_id": first_page.records[0].source_id}
+    )
+    duplicate_page = second_page.model_copy(
+        update={"records": (duplicate_record, *second_page.records[1:])}
+    )
+    tracker = SearchPageTracker()
+
+    tracker.add(first_page)
+
+    with pytest.raises(ParserContractError, match="duplicate source IDs across pages"):
+        tracker.add(duplicate_page)

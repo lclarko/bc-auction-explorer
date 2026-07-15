@@ -114,6 +114,28 @@ def test_manual_scrape_writes_atomic_json_output(monkeypatch, capsys, tmp_path: 
     assert list(tmp_path.glob(".scrape.json.*")) == []
 
 
+def test_atomic_output_failure_preserves_the_existing_file(
+    monkeypatch, capsys, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
+    output_path = tmp_path / "scrape.json"
+    output_path.write_text("original output\n", encoding="utf-8")
+
+    def fail_replace(source: Path, destination: Path) -> None:
+        raise OSError("replacement failed")
+
+    monkeypatch.setattr(cli.os, "replace", fail_replace)
+
+    exit_code = cli.main(["scrape", "--limit", "1", "--output", str(output_path)])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "replacement failed" in captured.err
+    assert output_path.read_text(encoding="utf-8") == "original output\n"
+    assert list(tmp_path.glob(".scrape.json.*")) == []
+
+
 def test_manual_scrape_reports_detail_parser_failures(monkeypatch, capsys) -> None:
     class FailingClient(_SuccessfulClient):
         def get_item_detail(self, source_url: str) -> FetchedPage:

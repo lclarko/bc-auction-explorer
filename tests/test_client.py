@@ -73,6 +73,38 @@ def test_client_rejects_cross_host_redirect_before_requesting_target() -> None:
     assert requested_urls == ["https://www.bcauction.ca/start"]
 
 
+def test_client_rejects_same_host_http_redirect_before_requesting_target() -> None:
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        return httpx.Response(
+            302,
+            headers={"location": "http://www.bcauction.ca/results"},
+            request=request,
+        )
+
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="outside the configured host"):
+            client.get("/start")
+
+    assert requested_urls == ["https://www.bcauction.ca/start"]
+
+
+def test_client_rejects_direct_same_host_http_url() -> None:
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        return httpx.Response(200, content=b"<html>unexpected</html>", request=request)
+
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError, match="outside the configured host"):
+            client.get("http://www.bcauction.ca/results")
+
+    assert requested_urls == []
+
+
 def test_client_rejects_redirect_without_a_location() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(302, request=request)
@@ -321,6 +353,29 @@ def test_client_honors_retry_after_with_a_bounded_delay(monkeypatch) -> None:
         client.get("/retries")
 
     assert delays == [2.0]
+
+
+def test_client_honors_the_full_retry_after_delay(monkeypatch) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(503, headers={"retry-after": "30"}, request=request)
+        return httpx.Response(200, content=b"<html>recovered</html>", request=request)
+
+    monkeypatch.setattr(client_module.time, "sleep", delays.append)
+    with AuctionClient(
+        min_request_interval=0,
+        max_retries=1,
+        retry_backoff=0,
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        client.get("/retries")
+
+    assert delays == [30.0]
 
 
 def test_client_does_not_retry_an_ordinary_server_error() -> None:

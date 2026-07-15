@@ -8,7 +8,7 @@ from bc_auction.parsers import parse_search_results
 _FIXTURES = Path(__file__).parent / "fixtures"
 _MANIFEST = _FIXTURES / "manifest.json"
 _EMAIL = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
-_SESSION_VALUE = re.compile(r"(?i)sessionID=([^&\s'\"<>]+)")
+_SESSION_VALUE = re.compile(r"(?i)sessionID=([^&^\s'\"<>]+)")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _RESULTS_URL = "https://www.bcauction.ca/open.dll/submitDocSearch"
 
@@ -48,7 +48,7 @@ def test_fixture_manifest_covers_every_html_fixture() -> None:
         assert "\ufffd" not in text
         assert "mailto:" not in text.casefold()
         assert _EMAIL.search(text) is None
-        assert all(value.startswith("SESSION_ID") for value in _SESSION_VALUE.findall(text))
+        assert set(_SESSION_VALUE.findall(text)) <= {"SESSION_ID"}
 
 
 def test_populated_result_fixtures_contain_only_synthetic_bid_amounts() -> None:

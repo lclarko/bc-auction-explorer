@@ -30,6 +30,29 @@ def test_parses_the_captured_search_flow() -> None:
     assert browse_url.startswith("https://www.bcauction.ca/open.dll/submitLogin?")
 
 
+@pytest.mark.parametrize(
+    ("html", "parser", "error"),
+    [
+        ("<html></html>", parse_welcome_content_url, "one content frame"),
+        (
+            '<frame src="showWelcomeContent?one"><frame src="showWelcomeContent?two">',
+            parse_welcome_content_url,
+            "one content frame",
+        ),
+        ("<html></html>", parse_browse_url, "one auction browse link"),
+        (
+            '<a href="submitLogin?redirect=showDocumentSearch">one</a>'
+            '<a href="submitLogin?redirect=showDocumentSearch">two</a>',
+            parse_browse_url,
+            "one auction browse link",
+        ),
+    ],
+)
+def test_requires_one_navigation_candidate(html: str, parser: object, error: str) -> None:
+    with pytest.raises(ParserContractError, match=error):
+        parser(html, "https://www.bcauction.ca/open.dll/welcome")  # type: ignore[operator]
+
+
 def test_preserves_captured_form_fields_and_applies_open_auction_values() -> None:
     form = parse_search_form(
         _fixture("search-entry.html"),

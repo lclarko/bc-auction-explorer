@@ -20,9 +20,20 @@ def test_canonicalize_source_url_removes_encoded_session_parameter_names() -> No
         "disID=8733643&session%49D=value"
     )
 
-    assert canonical_url == (
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&docType=Tender"
+    assert canonical_url == "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643"
+
+
+def test_canonicalize_source_url_keeps_only_the_stable_display_id() -> None:
+    first = canonicalize_source_url(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&"
+        "dis_version_nos=0&docType=Tender&docTypeQual=TN&doc_search_by=Tend&sessionID=ONE"
     )
+    second = canonicalize_source_url(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?doc_search_by=Tend&"
+        "docTypeQual=TN&disID=8733643&docType=Tender&dis_version_nos=2&sessionID=TWO"
+    )
+
+    assert first == second == "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643"
 
 
 def test_canonicalize_source_url_rejects_an_embedded_session_id() -> None:
@@ -31,3 +42,22 @@ def test_canonicalize_source_url_rejects_an_embedded_session_id() -> None:
             "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&"
             "redirect=showDocSummary%3FsessionID%3DSECRET"
         )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
+        "https://example.com/open.dll/showDisplayDocument?disID=8733643",
+        "https://user@www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
+        "https://www.bcauction.ca:8443/open.dll/showDisplayDocument?disID=8733643",
+        "https://www.bcauction.ca/open.dll/showOtherDocument?disID=8733643",
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?docType=Tender",
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=",
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2",
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&unexpected=1",
+    ],
+)
+def test_canonicalize_source_url_rejects_invalid_identity_urls(url: str) -> None:
+    with pytest.raises(ValueError):
+        canonicalize_source_url(url)

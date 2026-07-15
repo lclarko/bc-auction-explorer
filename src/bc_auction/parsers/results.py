@@ -142,10 +142,11 @@ def _parse_record(link: Tag, columns: _ResultColumnMap, base_url: str) -> Search
         raise ParserContractError("auction summary row did not contain a valid auction number")
 
     detail_row = summary_row.find_next_sibling("tr")
-    if not isinstance(detail_row, Tag) and columns.title_in_detail:
+    needs_detail_row = columns.title_in_detail or columns.closing_at_in_detail
+    if not isinstance(detail_row, Tag) and needs_detail_row:
         raise ParserContractError("auction summary row did not have a detail row")
     detail_cells = _content_cells(detail_row) if isinstance(detail_row, Tag) else ()
-    if columns.title_in_detail and len(detail_cells) != columns.detail_cell_count:
+    if needs_detail_row and len(detail_cells) != columns.detail_cell_count:
         raise ParserContractError("auction detail row did not have the expected content cells")
 
     title: str | None = None
