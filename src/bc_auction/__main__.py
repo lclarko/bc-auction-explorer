@@ -18,6 +18,7 @@ from bc_auction.parsers import (
 )
 
 _SESSION_ID = re.compile(r"(?i)(sessionID=)[^&\s'\"<>]+")
+_MAX_SEARCH_PAGES = 100
 
 
 def _positive_int(value: str) -> int:
@@ -32,21 +33,37 @@ def _collect_search_records(client: AuctionClient, limit: int) -> tuple[SearchRe
     tracker = SearchPageTracker()
     records: list[SearchResultRecord] = []
     visited_page_urls: set[str] = set()
+    pages_seen = 0
+    previous_page_number: int | None = None
+    previous_record_end: int | None = None
 
     while len(records) < limit:
+        if pages_seen >= _MAX_SEARCH_PAGES:
+            raise ParserContractError("search results exceeded the maximum page limit")
         if page.url in visited_page_urls:
             raise ParserContractError("search results repeated a page URL")
         visited_page_urls.add(page.url)
 
         results_page = parse_search_results(page.decode().text, page.url)
+        pages_seen += 1
+        pagination = results_page.pagination
+        if pagination is not None:
+            if previous_page_number is not None and pagination.current_page <= previous_page_number:
+                raise ParserContractError("search results did not advance to a later page")
+            if previous_record_end is not None and pagination.record_start <= previous_record_end:
+                raise ParserContractError("search results did not advance to later records")
+            previous_page_number = pagination.current_page
+            previous_record_end = pagination.record_end
         tracker.add(results_page)
         records.extend(results_page.records[: limit - len(records)])
 
-        if len(records) == limit or results_page.pagination is None:
+        if len(records) == limit or pagination is None:
             break
-        next_page_url = results_page.pagination.next_page_url
+        next_page_url = pagination.next_page_url
         if next_page_url is None:
             break
+        if pages_seen >= _MAX_SEARCH_PAGES:
+            raise ParserContractError("search results exceeded the maximum page limit")
         page = client.get(str(next_page_url))
 
     return tuple(records)
@@ -119,7 +136,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(json.dumps(output, indent=2))
     if failures:
         print(f"{len(failures)} listing failures", file=sys.stderr)
-        return 1
+        return 2
     return 0
 
 

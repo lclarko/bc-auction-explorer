@@ -89,8 +89,10 @@ def parse_search_results(html: str, page_url: str) -> SearchResultsPage:
 
     records = tuple(_parse_record(link, columns, page_url) for link in item_links)
     _ensure_unique_source_ids(records)
+    pagination = _parse_pagination(soup, page_url)
+    _validate_pagination(pagination, record_count=len(records))
 
-    return SearchResultsPage(records=records, pagination=_parse_pagination(soup, page_url))
+    return SearchResultsPage(records=records, pagination=pagination)
 
 
 def _validate_page_identity(soup: BeautifulSoup) -> None:
@@ -264,16 +266,56 @@ def _parse_pagination(soup: BeautifulSoup, base_url: str) -> SearchPagination:
     )
 
 
+def _validate_pagination(pagination: SearchPagination, record_count: int) -> None:
+    if pagination.record_start > pagination.record_end:
+        raise ParserContractError("results page record range started after it ended")
+    if pagination.record_end > pagination.total_records:
+        raise ParserContractError("results page record range exceeded the total records")
+    if pagination.current_page == 1 and pagination.record_start != 1:
+        raise ParserContractError("the first results page did not start at record 1")
+
+    expected_record_count = pagination.record_end - pagination.record_start + 1
+    if record_count != expected_record_count:
+        raise ParserContractError("results page record count did not match its record range")
+
+    if pagination.record_end == pagination.total_records:
+        if pagination.next_page_url is not None:
+            raise ParserContractError("the final results page had a next-page URL")
+        return
+    if pagination.next_page_url is None:
+        raise ParserContractError("a non-final results page did not have a next-page URL")
+
+    next_page_number = _page_number(str(pagination.next_page_url))
+    if next_page_number is None:
+        raise ParserContractError("results page next-page URL did not contain a page number")
+    if next_page_number <= pagination.current_page:
+        raise ParserContractError("the next results page did not advance")
+
+
 def _page_urls(soup: BeautifulSoup, base_url: str) -> dict[int, HttpUrl]:
     page_urls: dict[int, HttpUrl] = {}
     for link in soup.select('a[href*="submitDocSearch"]'):
         page_url = urljoin(base_url, str(link["href"]))
-        parsed = urlparse(page_url)
-        current_page = parse_qs(parsed.query).get("currentPage")
-        if current_page is None or len(current_page) != 1 or not current_page[0].isdigit():
+        current_page = _page_number(page_url, required=False)
+        if current_page is None:
             continue
-        page_urls[int(current_page[0])] = _HTTP_URL.validate_python(page_url)
+        parsed_url = _HTTP_URL.validate_python(page_url)
+        existing_url = page_urls.get(current_page)
+        if existing_url is not None and str(existing_url) != str(parsed_url):
+            raise ParserContractError(
+                f"results page had conflicting URLs for pagination page {current_page}"
+            )
+        page_urls[current_page] = parsed_url
     return page_urls
+
+
+def _page_number(page_url: str, *, required: bool = True) -> int | None:
+    current_page = parse_qs(urlparse(page_url).query).get("currentPage")
+    if current_page is not None and len(current_page) == 1 and current_page[0].isdigit():
+        return int(current_page[0])
+    if required:
+        raise ParserContractError("results page next-page URL did not contain a page number")
+    return None
 
 
 def _ensure_unique_source_ids(records: tuple[SearchResultRecord, ...]) -> None:

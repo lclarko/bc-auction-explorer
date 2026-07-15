@@ -95,6 +95,43 @@ def test_rejects_cross_host_detail_urls() -> None:
         parse_search_results(html, _RESULTS_URL)
 
 
+@pytest.mark.parametrize(
+    ("replacement", "replace_next_page", "error"),
+    [
+        ("31-30&nbsp;/&nbsp;131", False, "started after it ended"),
+        ("1-30&nbsp;/&nbsp;29", False, "exceeded the total records"),
+        ("2-31&nbsp;/&nbsp;131", False, "did not start at record 1"),
+        ("1-29&nbsp;/&nbsp;131", False, "record count did not match"),
+        ("1-30&nbsp;/&nbsp;30", False, "final results page had a next-page URL"),
+        ("1-30&nbsp;/&nbsp;131", True, "a non-final results page did not have a next-page URL"),
+    ],
+)
+def test_rejects_inconsistent_pagination_ranges(
+    replacement: str,
+    replace_next_page: bool,
+    error: str,
+) -> None:
+    html = _fixture("results-open-page-1.html")
+    if replace_next_page:
+        html = html.replace("currentPage=2", "currentPage=9")
+    else:
+        html = html.replace("1-30&nbsp;/&nbsp;131", replacement)
+
+    with pytest.raises(ParserContractError, match=error):
+        parse_search_results(html, _RESULTS_URL)
+
+
+def test_rejects_conflicting_urls_for_one_logical_page() -> None:
+    html = _fixture("results-open-page-1.html").replace(
+        "recordNum=31&currentPage=2",
+        "recordNum=999&currentPage=2",
+        1,
+    )
+
+    with pytest.raises(ParserContractError, match="conflicting URLs for pagination page 2"):
+        parse_search_results(html, _RESULTS_URL)
+
+
 def test_tracker_rejects_repeated_pages_and_source_ids() -> None:
     first_page = parse_search_results(_fixture("results-open-page-1.html"), _RESULTS_URL)
     second_page = parse_search_results(_fixture("results-open-page-2.html"), _RESULTS_URL)
