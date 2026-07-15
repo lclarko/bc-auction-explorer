@@ -1,0 +1,50 @@
+<html>
+<!--  Copyright � 2001, 2002 OGMA Consulting Corp. -->
+<!--  bc_index.html  -->
+<head>
+  <meta http-equiv="Expires" content="-1">
+  <title>BC Auction</title>
+
+  <script language="javascript" type="text/javascript" src="../js/cookie.js"></script>
+  <script language="javascript" type="text/javascript">
+
+    addSessionId("SESSION_ID");
+
+    if (document.cookie == "") {
+      document.location = 'showErrorDisplay?sessionID=SESSION_ID&messageType=Warning&errorMessage=ValErr0001&sourceType=JavaScript';
+    }
+  </script>
+</head>
+
+<frameset framespacing="0" border="false" frameborder="0" marginwidth=0 marginheight=0 rows="86, *, 40"
+   onUnload="removeSessionId('SESSION_ID');">
+
+  <frame src="showHeader?sessionID=SESSION_ID&Language=En&cssStyle=ext/&client=bc"
+    id="_SESSION_IDheader" name="_SESSION_IDheader" scrolling=no noresize>
+
+  <frameset framespacing="0" border="false" frameborder="0" marginwidth=0 marginheight=0 cols="174, 1, *">
+
+    <frameset framespacing="0" border="false" frameborder="0" marginwidth=0 marginheight=0 rows="33, *">
+
+      <frame src="../html/bc_home.html"
+        id="_SESSION_IDbcHome" name="_SESSION_IDbcHome" scrolling=no noresize>
+
+      <frame src="showWelcomeLinks?sessionID=SESSION_ID&Language=En&cssStyle="
+        id="_SESSION_IDmenubar" name="_SESSION_IDmenubar" scrolling=auto noresize>
+
+    </frameset>
+
+    <frame src="../html/bc_spacer.html"
+      id="_SESSION_IDspacer" name="_SESSION_IDspacer" scrolling=no noresize>
+
+    <frame src="showWelcomeContent?sessionID=SESSION_ID&Language=En&cssStyle="
+      id="_SESSION_IDcontent" name="_SESSION_IDcontent" scrolling=auto noresize>
+
+  </frameset>
+
+  <frame src="showFooter?sessionID=SESSION_ID&Language=En&cssStyle=_ext&client=bc"
+    id="_SESSION_IDfooter" name="_SESSION_IDfooter" scrolling=no noresize>
+
+</frameset>
+
+</html>
