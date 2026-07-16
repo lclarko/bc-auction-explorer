@@ -7,7 +7,7 @@ import pytest
 from alembic.config import Config
 from sqlalchemy import inspect, select, update
 from sqlalchemy.engine import make_url
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from alembic import command
 from bc_auction.database import (
@@ -93,6 +93,10 @@ def test_migration_creates_the_persistence_schema(repository: AuctionRepository)
     assert "current_observation_hash" in {
         column["name"] for column in inspect(engine).get_columns("auction_items")
     }
+    assert "uq_item_observations_item_observed_hash" in {
+        constraint["name"]
+        for constraint in inspect(engine).get_unique_constraints("item_observations")
+    }
 
 
 def test_repeat_ingestion_is_idempotent_and_preserves_history(
@@ -114,6 +118,83 @@ def test_repeat_ingestion_is_idempotent_and_preserves_history(
     with repository._engine.connect() as connection:
         assert len(connection.execute(select(auction_items)).all()) == 1
         assert len(connection.execute(select(item_observations)).all()) == 1
+
+
+def test_current_observation_hash_migration_uses_the_latest_scrape_run(
+    repository: AuctionRepository,
+) -> None:
+    first_run_id = repository.start_scrape_run(
+        ScrapeRunInput(
+            requested_limit=1,
+            keyword="",
+            sort="EndingFirst",
+            parser_version="test-v1",
+        ),
+        started_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    observed_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
+    repository.persist_reconciled_record(
+        first_run_id,
+        convert_reconciled_record(_detail(current_bid=Decimal("25.00")), observed_at=observed_at),
+    )
+    latest_run_id = repository.start_scrape_run(
+        ScrapeRunInput(
+            requested_limit=1,
+            keyword="",
+            sort="EndingFirst",
+            parser_version="test-v1",
+        ),
+        started_at=datetime(2026, 7, 15, 0, 1, tzinfo=UTC),
+    )
+    latest_record = convert_reconciled_record(
+        _detail(current_bid=Decimal("30.00")),
+        observed_at=observed_at,
+    )
+    repository.persist_reconciled_record(latest_run_id, latest_record)
+
+    database_url = repository._engine.url.render_as_string(hide_password=False)
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    repository._engine.dispose()
+    command.downgrade(config, "20260716_02")
+    try:
+        command.upgrade(config, "20260716_03")
+        engine = create_postgres_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                item = connection.execute(select(auction_items)).mappings().one()
+        finally:
+            engine.dispose()
+        assert item["current_observation_hash"] == latest_record.observation_hash
+    finally:
+        command.upgrade(config, "head")
+
+
+def test_current_observation_hash_migration_rejects_ambiguous_history(
+    repository: AuctionRepository,
+) -> None:
+    observed_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
+    first_run_id = _run(repository)
+    repository.persist_reconciled_record(
+        first_run_id,
+        convert_reconciled_record(_detail(current_bid=Decimal("25.00")), observed_at=observed_at),
+    )
+    second_run_id = _run(repository)
+    repository.persist_reconciled_record(
+        second_run_id,
+        convert_reconciled_record(_detail(current_bid=Decimal("30.00")), observed_at=observed_at),
+    )
+
+    database_url = repository._engine.url.render_as_string(hide_password=False)
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    repository._engine.dispose()
+    command.downgrade(config, "20260716_02")
+    try:
+        with pytest.raises(DBAPIError, match="ambiguous current observation history"):
+            command.upgrade(config, "20260716_03")
+    finally:
+        command.downgrade(config, "base")
 
 
 def test_observation_and_metadata_changes_update_the_current_item(
@@ -167,31 +248,83 @@ def test_observation_and_metadata_changes_update_the_current_item(
         assert len(connection.execute(select(item_observations)).all()) == 3
 
 
-def test_stale_terminal_observation_records_first_closed_at(repository: AuctionRepository) -> None:
+def test_stale_terminal_observation_does_not_change_the_current_item(
+    repository: AuctionRepository,
+) -> None:
     run_id = _run(repository)
-    repository.persist_reconciled_record(
-        run_id,
-        convert_reconciled_record(
-            _detail(),
-            observed_at=datetime(2026, 7, 15, 2, tzinfo=UTC),
-        ),
+    current_record = convert_reconciled_record(
+        _detail(),
+        observed_at=datetime(2026, 7, 15, 2, tzinfo=UTC),
     )
+    repository.persist_reconciled_record(run_id, current_record)
 
-    stale_terminal = repository.persist_reconciled_record(
+    stale_terminal_record = convert_reconciled_record(
+        _detail(status=AuctionStatus.CLOSED, status_raw="Closed"),
+        observed_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
+    )
+    stale_terminal = repository.persist_reconciled_record(run_id, stale_terminal_record)
+    repeated_stale_terminal = repository.persist_reconciled_record(
         run_id,
-        convert_reconciled_record(
-            _detail(status=AuctionStatus.CLOSED, status_raw="Closed"),
-            observed_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
-        ),
+        stale_terminal_record,
     )
 
     assert stale_terminal.updated is False
     assert stale_terminal.observation_created is True
+    assert repeated_stale_terminal.updated is False
+    assert repeated_stale_terminal.observation_created is False
     with repository._engine.connect() as connection:
         item = connection.execute(select(auction_items)).mappings().one()
     assert item["status"] == AuctionStatus.OPEN.value
-    assert item["closed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
+    assert item["closed_at"] is None
     assert item["last_seen_at"] == datetime(2026, 7, 15, 2, tzinfo=UTC)
+    assert item["last_changed_at"] == datetime(2026, 7, 15, 2, tzinfo=UTC)
+    assert item["current_observation_hash"] == current_record.observation_hash
+
+
+def test_terminal_snapshot_is_not_reopened_by_a_newer_nonterminal_observation(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    closed_record = convert_reconciled_record(
+        _detail(
+            current_bid=Decimal("30.00"),
+            status=AuctionStatus.CLOSED,
+            status_raw="Closed",
+            title="Closed utility vehicle",
+        ),
+        observed_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, closed_record)
+    reopened_record = convert_reconciled_record(
+        _detail(
+            current_bid=Decimal("35.00"),
+            status=AuctionStatus.OPEN,
+            status_raw="isbid=Y",
+            title="Transient open utility vehicle",
+        ),
+        observed_at=datetime(2026, 7, 15, 2, tzinfo=UTC),
+    )
+
+    reopened = repository.persist_reconciled_record(run_id, reopened_record)
+    repeated_reopened = repository.persist_reconciled_record(
+        run_id,
+        reopened_record.model_copy(update={"observed_at": datetime(2026, 7, 15, 3, tzinfo=UTC)}),
+    )
+
+    assert reopened.updated is False
+    assert reopened.observation_created is True
+    assert repeated_reopened.updated is False
+    assert repeated_reopened.observation_created is False
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
+    assert item["title"] == "Closed utility vehicle"
+    assert item["status"] == AuctionStatus.CLOSED.value
+    assert item["closed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
+    assert item["last_seen_at"] == datetime(2026, 7, 15, 3, tzinfo=UTC)
+    assert item["last_changed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
+    assert item["current_observation_hash"] == closed_record.observation_hash
+    assert len(observations) == 2
 
 
 def test_closed_listings_remain_queryable_and_identity_collisions_fail(
@@ -208,6 +341,19 @@ def test_closed_listings_remain_queryable_and_identity_collisions_fail(
         item = connection.execute(select(auction_items)).mappings().one()
         assert item["status"] == AuctionStatus.CLOSED.value
         assert item["closed_at"] == datetime(2026, 7, 15, tzinfo=UTC)
+
+    stale_closed = repository.persist_reconciled_record(
+        run_id,
+        convert_reconciled_record(
+            _detail(status=AuctionStatus.CLOSED, status_raw="Closed"),
+            observed_at=datetime(2026, 7, 14, 23, tzinfo=UTC),
+        ),
+    )
+    assert stale_closed.updated is False
+    assert stale_closed.observation_created is True
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+    assert item["closed_at"] == datetime(2026, 7, 15, tzinfo=UTC)
 
     conflicting = convert_reconciled_record(
         _detail(source_id="A000002"),

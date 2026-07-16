@@ -24,12 +24,68 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM auction_items AS item
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM item_observations AS observation
+                    WHERE observation.auction_item_id = item.id
+                )
+            ) THEN
+                RAISE EXCEPTION
+                    'cannot backfill current observation state without observation history';
+            END IF;
+
+            IF EXISTS (
+                WITH ranked AS (
+                    SELECT item.id AS auction_item_id,
+                           observation.observation_hash,
+                           rank() OVER (
+                               PARTITION BY item.id
+                               ORDER BY
+                                   (observation.observed_at = item.last_seen_at) DESC,
+                                   (observation.observed_at <= item.last_seen_at) DESC,
+                                   observation.observed_at DESC,
+                                   run.started_at DESC,
+                                   run.created_at DESC,
+                                   observation.created_at DESC
+                           ) AS temporal_rank
+                    FROM auction_items AS item
+                    JOIN item_observations AS observation
+                      ON observation.auction_item_id = item.id
+                    JOIN scrape_runs AS run ON run.id = observation.scrape_run_id
+                )
+                SELECT 1
+                FROM ranked
+                WHERE temporal_rank = 1
+                GROUP BY auction_item_id
+                HAVING count(DISTINCT observation_hash) > 1
+            ) THEN
+                RAISE EXCEPTION
+                    'cannot backfill ambiguous current observation history';
+            END IF;
+        END $$;
+        """
+    )
+    op.execute(
+        """
         UPDATE auction_items AS item
         SET current_observation_hash = (
-            SELECT observation_hash
-            FROM item_observations
-            WHERE auction_item_id = item.id
-            ORDER BY observed_at DESC, id DESC
+            SELECT observation.observation_hash
+            FROM item_observations AS observation
+            JOIN scrape_runs AS run ON run.id = observation.scrape_run_id
+            WHERE observation.auction_item_id = item.id
+            ORDER BY
+                (observation.observed_at = item.last_seen_at) DESC,
+                (observation.observed_at <= item.last_seen_at) DESC,
+                observation.observed_at DESC,
+                run.started_at DESC,
+                run.created_at DESC,
+                observation.created_at DESC,
+                observation.observation_hash DESC
             LIMIT 1
         )
         """

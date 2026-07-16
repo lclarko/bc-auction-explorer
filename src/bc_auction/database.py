@@ -13,6 +13,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
     Uuid,
     create_engine,
     text,
@@ -100,6 +101,12 @@ item_observations = Table(
     Column("observation_hash", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('open', 'closed', 'withdrawn', 'unknown')"),
+    UniqueConstraint(
+        "auction_item_id",
+        "observed_at",
+        "observation_hash",
+        name="uq_item_observations_item_observed_hash",
+    ),
 )
 
 Index(

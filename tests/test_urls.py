@@ -93,15 +93,30 @@ def test_extract_source_dis_id_normalizes_navigation_parameters_and_session_valu
 
 
 @pytest.mark.parametrize(
-    "url",
+    ("url", "error"),
     [
-        "https://example.com/open.dll/showDisplayDocument?disID=8733643",
-        "https://www.bcauction.ca/open.dll/showDocSummary?disID=8733643",
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2",
-        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&"
-        "redirect=showDocSummary%3FsessionID%3Dprivate",
+        (
+            "https://example.com/open.dll/showDisplayDocument?disID=8733643",
+            "BC Auction HTTPS host",
+        ),
+        (
+            "https://www.bcauction.ca/open.dll/showDocSummary?disID=8733643",
+            "showDisplayDocument",
+        ),
+        (
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2",
+            "display ID",
+        ),
+        (
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&"
+            "redirect=showDocSummary%3FsessionID%3Dprivate",
+            "embedded session ID",
+        ),
     ],
 )
-def test_extract_source_dis_id_rejects_unstable_or_session_bearing_urls(url: str) -> None:
-    with pytest.raises(ValueError):
+def test_extract_source_dis_id_rejects_unstable_or_session_bearing_urls(
+    url: str,
+    error: str,
+) -> None:
+    with pytest.raises(ValueError, match=error):
         extract_source_dis_id(url)

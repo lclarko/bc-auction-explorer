@@ -353,9 +353,13 @@ class AuctionRepository:
                     updated_at=now,
                 )
             )
-            self._insert_observation(connection, item_id, run_id, record)
+            observation_created = self._insert_observation(connection, item_id, run_id, record)
             self._record_location_alias(connection, record)
-            return PersistResult(created=True, updated=False, observation_created=True)
+            return PersistResult(
+                created=True,
+                updated=False,
+                observation_created=observation_created,
+            )
 
         item_id = existing["id"]
         if (
@@ -370,13 +374,23 @@ class AuctionRepository:
                 run_id,
                 record,
             )
-            closed_at = _first_terminal_observed_at(existing["closed_at"], record)
-            if closed_at != existing["closed_at"]:
-                connection.execute(
-                    update(auction_items)
-                    .where(auction_items.c.id == item_id)
-                    .values(closed_at=closed_at)
-                )
+            return PersistResult(
+                created=False,
+                updated=False,
+                observation_created=observation_created,
+            )
+        if _is_terminal(existing["status"]) and not _is_terminal(record.status):
+            observation_created = self._record_nonterminal_history_after_closure(
+                connection,
+                item_id,
+                run_id,
+                record,
+            )
+            connection.execute(
+                update(auction_items)
+                .where(auction_items.c.id == item_id)
+                .values(last_seen_at=now, updated_at=now)
+            )
             return PersistResult(
                 created=False,
                 updated=False,
@@ -402,14 +416,38 @@ class AuctionRepository:
                 updated_at=now,
             )
         )
-        if observation_changed:
+        observation_created = (
             self._insert_observation(connection, item_id, run_id, record)
+            if observation_changed
+            else False
+        )
         self._record_location_alias(connection, record)
         return PersistResult(
             created=False,
-            updated=metadata_changed or observation_changed,
-            observation_created=observation_changed,
+            updated=metadata_changed or observation_changed or closed_at_changed,
+            observation_created=observation_created,
         )
+
+    def _record_nonterminal_history_after_closure(
+        self,
+        connection: Connection,
+        item_id: UUID,
+        run_id: UUID,
+        record: PersistedAuctionRecord,
+    ) -> bool:
+        latest_history_hash = connection.execute(
+            select(item_observations.c.observation_hash)
+            .where(item_observations.c.auction_item_id == item_id)
+            .order_by(
+                item_observations.c.observed_at.desc(),
+                item_observations.c.created_at.desc(),
+                item_observations.c.observation_hash.desc(),
+            )
+            .limit(1)
+        ).scalar_one_or_none()
+        if latest_history_hash == record.observation_hash:
+            return False
+        return self._insert_observation(connection, item_id, run_id, record)
 
     def _insert_stale_observation_if_new(
         self,
@@ -418,17 +456,7 @@ class AuctionRepository:
         run_id: UUID,
         record: PersistedAuctionRecord,
     ) -> bool:
-        existing_observation = connection.execute(
-            select(item_observations.c.id).where(
-                item_observations.c.auction_item_id == item_id,
-                item_observations.c.observed_at == record.observed_at,
-                item_observations.c.observation_hash == record.observation_hash,
-            )
-        ).scalar_one_or_none()
-        if existing_observation is not None:
-            return False
-        self._insert_observation(connection, item_id, run_id, record)
-        return True
+        return self._insert_observation(connection, item_id, run_id, record)
 
     def _insert_observation(
         self,
@@ -436,23 +464,14 @@ class AuctionRepository:
         item_id: UUID,
         run_id: UUID,
         record: PersistedAuctionRecord,
-    ) -> None:
-        connection.execute(
-            insert(item_observations).values(
-                id=_new_uuid(),
-                auction_item_id=item_id,
-                scrape_run_id=run_id,
-                observed_at=record.observed_at,
-                current_bid=record.current_bid,
-                minimum_bid=record.minimum_bid,
-                starting_bid=record.starting_bid,
-                bid_count=record.bid_count,
-                closing_at=record.closing_at,
-                status=record.status.value,
-                observation_hash=record.observation_hash,
-                created_at=record.observed_at,
-            )
+    ) -> bool:
+        result = connection.execute(
+            postgres_insert(item_observations)
+            .values(**_observation_values(item_id, run_id, record))
+            .on_conflict_do_nothing(constraint="uq_item_observations_item_observed_hash")
+            .returning(item_observations.c.id)
         )
+        return result.scalar_one_or_none() is not None
 
     def _record_location_alias(
         self,
@@ -520,17 +539,36 @@ def _item_values(record: PersistedAuctionRecord) -> dict[str, object]:
     }
 
 
-def _is_terminal(status: AuctionStatus) -> bool:
-    return status in {AuctionStatus.CLOSED, AuctionStatus.WITHDRAWN}
+def _observation_values(
+    item_id: UUID,
+    run_id: UUID,
+    record: PersistedAuctionRecord,
+) -> dict[str, object]:
+    return {
+        "id": _new_uuid(),
+        "auction_item_id": item_id,
+        "scrape_run_id": run_id,
+        "observed_at": record.observed_at,
+        "current_bid": record.current_bid,
+        "minimum_bid": record.minimum_bid,
+        "starting_bid": record.starting_bid,
+        "bid_count": record.bid_count,
+        "closing_at": record.closing_at,
+        "status": record.status.value,
+        "observation_hash": record.observation_hash,
+        "created_at": record.observed_at,
+    }
+
+
+def _is_terminal(status: AuctionStatus | str) -> bool:
+    return str(status) in {AuctionStatus.CLOSED.value, AuctionStatus.WITHDRAWN.value}
 
 
 def _first_terminal_observed_at(
     existing_closed_at: datetime | None,
     record: PersistedAuctionRecord,
 ) -> datetime | None:
-    if not _is_terminal(record.status):
-        return existing_closed_at
-    if existing_closed_at is None or record.observed_at < existing_closed_at:
+    if existing_closed_at is None and _is_terminal(record.status):
         return record.observed_at
     return existing_closed_at
 
