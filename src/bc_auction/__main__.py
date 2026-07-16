@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -5,7 +7,11 @@ import re
 import sys
 import tempfile
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+from uuid import UUID
 
 import httpx
 
@@ -19,9 +25,34 @@ from bc_auction.parsers import (
     reconcile_search_result,
 )
 
+if TYPE_CHECKING:
+    from sqlalchemy.engine import Engine
+
+    from bc_auction.persistence import (
+        AuctionRepository,
+        PersistResult,
+        ScrapeRunCounts,
+        ScrapeRunInput,
+    )
+
 _SESSION_ID = re.compile(r"(?i)(sessionID=)[^&\s'\"<>]+")
 _MAX_SEARCH_PAGES = 100
 _ScrapeRecord = SearchResultRecord | AuctionDetailRecord
+_PARSER_VERSION = "ms2-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class _SearchCollection:
+    records: tuple[SearchResultRecord, ...]
+    pages_visited: int
+
+
+@dataclass(frozen=True, slots=True)
+class _ScrapeOutcome:
+    records: list[_ScrapeRecord]
+    failures: list[dict[str, str]]
+    pages_visited: int
+    items_seen: int
 
 
 def _positive_int(value: str) -> int:
@@ -37,7 +68,7 @@ def _collect_search_records(
     *,
     keyword: str = "",
     display_order: str = "EndingFirst",
-) -> tuple[SearchResultRecord, ...]:
+) -> _SearchCollection:
     page = client.search_open_auctions(keyword=keyword, display_order=display_order)
     tracker = SearchPageTracker()
     records: list[SearchResultRecord] = []
@@ -75,7 +106,7 @@ def _collect_search_records(
             raise ParserContractError("search results exceeded the maximum page limit")
         page = client.get(str(next_request_url))
 
-    return tuple(records)
+    return _SearchCollection(records=tuple(records), pages_visited=pages_seen)
 
 
 def scrape(
@@ -86,6 +117,24 @@ def scrape(
     display_order: str = "EndingFirst",
     results_only: bool = False,
 ) -> tuple[list[_ScrapeRecord], list[dict[str, str]]]:
+    outcome = _scrape_with_outcome(
+        client,
+        limit,
+        keyword=keyword,
+        display_order=display_order,
+        results_only=results_only,
+    )
+    return outcome.records, outcome.failures
+
+
+def _scrape_with_outcome(
+    client: AuctionClient,
+    limit: int,
+    *,
+    keyword: str = "",
+    display_order: str = "EndingFirst",
+    results_only: bool = False,
+) -> _ScrapeOutcome:
     search_records = _collect_search_records(
         client,
         limit,
@@ -93,11 +142,16 @@ def scrape(
         display_order=display_order,
     )
     if results_only:
-        return list(search_records), []
+        return _ScrapeOutcome(
+            records=list(search_records.records),
+            failures=[],
+            pages_visited=search_records.pages_visited,
+            items_seen=len(search_records.records),
+        )
 
     records: list[_ScrapeRecord] = []
     failures: list[dict[str, str]] = []
-    for search_result in search_records:
+    for search_result in search_records.records:
         try:
             detail_page = client.get_item_detail(str(search_result.request_url))
             detail = parse_item_detail(detail_page.decode().text, detail_page.url)
@@ -110,7 +164,12 @@ def scrape(
                     "error": _redact_session_id(str(exc)),
                 }
             )
-    return records, failures
+    return _ScrapeOutcome(
+        records=records,
+        failures=failures,
+        pages_visited=search_records.pages_visited,
+        items_seen=len(search_records.records),
+    )
 
 
 def _redact_session_id(value: str) -> str:
@@ -126,6 +185,8 @@ def _build_parser() -> argparse.ArgumentParser:
     scrape_command.add_argument("--results-only", action="store_true")
     scrape_command.add_argument("--keyword", default="")
     scrape_command.add_argument("--sort", dest="display_order", default="EndingFirst")
+    scrape_command.add_argument("--persist", action="store_true")
+    scrape_command.add_argument("--database-url")
     return parser
 
 
@@ -162,15 +223,49 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command != "scrape":
         raise AssertionError(f"unsupported command: {args.command}")
 
+    repository: AuctionRepository | None = None
+    engine: Engine | None = None
+    run_id: UUID | None = None
+    outcome: _ScrapeOutcome | None = None
+    counts: ScrapeRunCounts | None = None
+    run_finished = False
     try:
+        if args.persist and args.results_only:
+            raise ValueError("--persist cannot be combined with --results-only")
+        if args.persist:
+            repository, engine = _open_repository(args.database_url)
+            repository.ping()
+            run_id = repository.start_scrape_run(
+                _scrape_run_input(args),
+                started_at=datetime.now(UTC),
+            )
         with AuctionClient() as client:
-            records, failures = scrape(
+            outcome = _scrape_with_outcome(
                 client,
                 args.limit,
                 keyword=args.keyword,
                 display_order=args.display_order,
                 results_only=args.results_only,
             )
+        records = outcome.records
+        failures = outcome.failures
+        if repository is not None and run_id is not None:
+            _validate_persistence_batch(records)
+            persistence_results, persistence_failures = _persist_records(
+                repository,
+                run_id,
+                records,
+            )
+            failures.extend(persistence_failures)
+            counts = _scrape_run_counts(outcome, persistence_results, len(failures))
+            from bc_auction.persistence import ScrapeRunStatus
+
+            repository.finish_scrape_run(
+                run_id,
+                status=ScrapeRunStatus.PARTIAL if failures else ScrapeRunStatus.SUCCEEDED,
+                counts=counts,
+            )
+            run_finished = True
         output = {
             "summary": {
                 "requested_limit": args.limit,
@@ -183,15 +278,131 @@ def main(argv: Sequence[str] | None = None) -> int:
             "records": [record.model_dump(mode="json") for record in records],
             "failures": failures,
         }
+        if run_id is not None:
+            output["persistence"] = {"scrape_run_id": str(run_id)}
         _write_output(args.output, output)
     except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
+        if repository is not None and run_id is not None and not run_finished:
+            _finish_failed_run(repository, run_id, outcome, counts)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        if repository is not None and run_id is not None and not run_finished:
+            _finish_failed_run(repository, run_id, outcome, counts)
+        print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
+        return 1
+    finally:
+        if engine is not None:
+            engine.dispose()
 
     if failures:
         print(f"{len(failures)} listing failures", file=sys.stderr)
         return 2
     return 0
+
+
+def _open_repository(database_url: str | None) -> tuple[AuctionRepository, Engine]:
+    from bc_auction.database import create_postgres_engine
+    from bc_auction.persistence import AuctionRepository
+
+    resolved_url = database_url or os.environ.get("BC_AUCTION_DATABASE_URL")
+    if not resolved_url:
+        raise ValueError("persistence requires --database-url or BC_AUCTION_DATABASE_URL")
+    engine = create_postgres_engine(resolved_url)
+    return AuctionRepository(engine), engine
+
+
+def _scrape_run_input(args: argparse.Namespace) -> ScrapeRunInput:
+    from bc_auction.persistence import ScrapeRunInput
+
+    return ScrapeRunInput(
+        requested_limit=args.limit,
+        keyword=args.keyword,
+        sort=args.display_order,
+        parser_version=_PARSER_VERSION,
+    )
+
+
+def _validate_persistence_batch(records: Sequence[_ScrapeRecord]) -> None:
+    source_ids = [record.source_id for record in records]
+    if len(source_ids) != len(set(source_ids)):
+        raise ValueError("persistence batch contained duplicate source IDs")
+    canonical_urls = [str(record.canonical_source_url) for record in records]
+    if len(canonical_urls) != len(set(canonical_urls)):
+        raise ValueError("persistence batch contained duplicate canonical source URLs")
+
+
+def _persist_records(
+    repository: AuctionRepository,
+    run_id: UUID,
+    records: Sequence[_ScrapeRecord],
+) -> tuple[list[PersistResult], list[dict[str, str]]]:
+    from bc_auction.persistence import (
+        IdentityConflictError,
+        PersistenceError,
+        convert_reconciled_record,
+    )
+
+    results: list[PersistResult] = []
+    failures: list[dict[str, str]] = []
+    for record in records:
+        if not isinstance(record, AuctionDetailRecord):
+            raise ValueError("persistence requires detail-complete records")
+        try:
+            persisted_record = convert_reconciled_record(record, observed_at=datetime.now(UTC))
+            results.append(repository.persist_reconciled_record(run_id, persisted_record))
+        except IdentityConflictError:
+            raise
+        except PersistenceError:
+            failures.append(
+                {
+                    "source_id": record.source_id,
+                    "canonical_source_url": str(record.canonical_source_url),
+                    "error": "persistence failed",
+                }
+            )
+    return results, failures
+
+
+def _scrape_run_counts(
+    outcome: _ScrapeOutcome,
+    results: Sequence[PersistResult],
+    item_failures: int,
+) -> ScrapeRunCounts:
+    from bc_auction.persistence import ScrapeRunCounts
+
+    return ScrapeRunCounts(
+        pages_visited=outcome.pages_visited,
+        items_seen=outcome.items_seen,
+        items_created=sum(result.created for result in results),
+        items_updated=sum(result.updated for result in results),
+        observations_created=sum(result.observation_created for result in results),
+        item_failures=item_failures,
+    )
+
+
+def _finish_failed_run(
+    repository: AuctionRepository,
+    run_id: UUID,
+    outcome: _ScrapeOutcome | None,
+    counts: ScrapeRunCounts | None,
+) -> None:
+    from bc_auction.persistence import ScrapeRunCounts, ScrapeRunStatus
+
+    repository.finish_scrape_run(
+        run_id,
+        status=ScrapeRunStatus.FAILED,
+        counts=counts
+        or ScrapeRunCounts(
+            pages_visited=outcome.pages_visited if outcome is not None else 0,
+            items_seen=outcome.items_seen if outcome is not None else 0,
+            items_created=0,
+            items_updated=0,
+            observations_created=0,
+            item_failures=len(outcome.failures) if outcome is not None else 0,
+        ),
+        error_summary="scrape failed",
+    )
 
 
 if __name__ == "__main__":

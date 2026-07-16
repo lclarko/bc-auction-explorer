@@ -1,12 +1,14 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
 import bc_auction.__main__ as cli
 from bc_auction.client import FetchedPage
 from bc_auction.errors import ParserContractError
+from bc_auction.persistence import PersistenceError, PersistResult, ScrapeRunStatus
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _RESULTS_URL = "https://www.bcauction.ca/open.dll/submitDocSearch"
@@ -101,6 +103,98 @@ def test_manual_scrape_supports_results_only_keyword_and_sort(monkeypatch, capsy
     assert "content_hash" not in output["records"][0]
 
 
+def test_persist_rejects_results_only_before_opening_the_source_client(capsys) -> None:
+    exit_code = cli.main(["scrape", "--persist", "--results-only"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert captured.err == "scrape failed: --persist cannot be combined with --results-only\n"
+
+
+def test_persist_requires_a_database_url_before_opening_the_source_client(
+    capsys,
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("BC_AUCTION_DATABASE_URL", raising=False)
+
+    exit_code = cli.main(["scrape", "--persist"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "requires --database-url or BC_AUCTION_DATABASE_URL" in captured.err
+
+
+class _FakePersistenceRepository:
+    run_id = UUID("00000000-0000-0000-0000-000000000001")
+
+    def __init__(self, *, persist_error: bool = False) -> None:
+        self.persist_error = persist_error
+        self.finished: list[tuple[ScrapeRunStatus, object]] = []
+        self.started = False
+
+    def ping(self) -> None:
+        return None
+
+    def start_scrape_run(self, *args: object, **kwargs: object) -> UUID:
+        self.started = True
+        return self.run_id
+
+    def persist_reconciled_record(self, *args: object, **kwargs: object) -> PersistResult:
+        if self.persist_error:
+            raise PersistenceError("database rejected auction persistence")
+        return PersistResult(created=True, updated=False, observation_created=True)
+
+    def finish_scrape_run(self, run_id: UUID, **kwargs: object) -> None:
+        assert run_id == self.run_id
+        self.finished.append((kwargs["status"], kwargs["counts"]))
+
+
+class _FakePersistenceEngine:
+    def dispose(self) -> None:
+        return None
+
+
+def test_persist_creates_and_finishes_a_successful_scrape_run(monkeypatch, capsys) -> None:
+    repository = _FakePersistenceRepository()
+    monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
+    monkeypatch.setattr(
+        cli,
+        "_open_repository",
+        lambda database_url: (repository, _FakePersistenceEngine()),
+    )
+
+    exit_code = cli.main(["scrape", "--limit", "1", "--persist", "--database-url", "postgresql://x"])
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert exit_code == 0
+    assert output["persistence"] == {"scrape_run_id": str(repository.run_id)}
+    assert repository.started is True
+    assert repository.finished[0][0] is ScrapeRunStatus.SUCCEEDED
+    assert repository.finished[0][1].observations_created == 1
+
+
+def test_persist_marks_storage_failure_as_a_partial_run(monkeypatch, capsys) -> None:
+    repository = _FakePersistenceRepository(persist_error=True)
+    monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
+    monkeypatch.setattr(
+        cli,
+        "_open_repository",
+        lambda database_url: (repository, _FakePersistenceEngine()),
+    )
+
+    exit_code = cli.main(["scrape", "--limit", "1", "--persist", "--database-url", "postgresql://x"])
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    assert exit_code == 2
+    assert output["failures"][0]["error"] == "persistence failed"
+    assert repository.finished[0][0] is ScrapeRunStatus.PARTIAL
+    assert repository.finished[0][1].item_failures == 1
+
+
 def test_manual_scrape_writes_atomic_json_output(monkeypatch, capsys, tmp_path: Path) -> None:
     monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
     output_path = tmp_path / "scrape.json"
@@ -192,10 +286,11 @@ def test_collect_search_records_follows_pagination() -> None:
             )
 
     client = PaginatedClient()
-    records = cli._collect_search_records(client, 31)
+    collection = cli._collect_search_records(client, 31)
 
-    assert len(records) == 31
-    assert records[-1].source_id == "A277450"
+    assert len(collection.records) == 31
+    assert collection.records[-1].source_id == "A277450"
+    assert collection.pages_visited == 2
     assert len(client.requested_urls) == 1
 
 
