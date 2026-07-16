@@ -40,12 +40,27 @@ def upgrade() -> None:
             END IF;
 
             IF EXISTS (
+                SELECT 1
+                FROM auction_items AS item
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM item_observations AS observation
+                    WHERE observation.auction_item_id = item.id
+                      AND observation.status = item.status
+                )
+            ) THEN
+                RAISE EXCEPTION
+                    'cannot backfill current observation state without matching status history';
+            END IF;
+
+            IF EXISTS (
                 WITH ranked AS (
                     SELECT item.id AS auction_item_id,
                            observation.observation_hash,
                            rank() OVER (
                                PARTITION BY item.id
                                ORDER BY
+                                   CASE WHEN observation.status = item.status THEN 0 ELSE 1 END,
                                    (observation.observed_at = item.last_seen_at) DESC,
                                    (observation.observed_at <= item.last_seen_at) DESC,
                                    observation.observed_at DESC,
@@ -79,6 +94,7 @@ def upgrade() -> None:
             JOIN scrape_runs AS run ON run.id = observation.scrape_run_id
             WHERE observation.auction_item_id = item.id
             ORDER BY
+                CASE WHEN observation.status = item.status THEN 0 ELSE 1 END,
                 (observation.observed_at = item.last_seen_at) DESC,
                 (observation.observed_at <= item.last_seen_at) DESC,
                 observation.observed_at DESC,

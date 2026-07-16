@@ -170,6 +170,105 @@ def test_current_observation_hash_migration_uses_the_latest_scrape_run(
         command.upgrade(config, "head")
 
 
+def test_current_observation_hash_migration_preserves_terminal_snapshot(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    closed_record = convert_reconciled_record(
+        _detail(
+            current_bid=Decimal("30.00"),
+            status=AuctionStatus.CLOSED,
+            status_raw="Closed",
+            title="Closed utility vehicle",
+        ),
+        observed_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, closed_record)
+    newer_open_record = convert_reconciled_record(
+        _detail(
+            current_bid=Decimal("35.00"),
+            title="Transient open utility vehicle",
+        ),
+        observed_at=datetime(2026, 7, 15, 2, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, newer_open_record)
+
+    database_url = repository._engine.url.render_as_string(hide_password=False)
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    repository._engine.dispose()
+    command.downgrade(config, "20260716_02")
+    try:
+        command.upgrade(config, "20260716_03")
+        engine = create_postgres_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                item = connection.execute(select(auction_items)).mappings().one()
+        finally:
+            engine.dispose()
+        assert item["status"] == AuctionStatus.CLOSED.value
+        assert item["current_observation_hash"] == closed_record.observation_hash
+        assert item["current_observation_hash"] != newer_open_record.observation_hash
+    finally:
+        command.upgrade(config, "head")
+
+
+def test_current_observation_hash_migration_preserves_open_snapshot(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    open_record = convert_reconciled_record(
+        _detail(
+            current_bid=Decimal("30.00"),
+            title="Open utility vehicle",
+        ),
+        observed_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, open_record)
+    newer_closed_record = convert_reconciled_record(
+        _detail(
+            current_bid=Decimal("35.00"),
+            status=AuctionStatus.CLOSED,
+            status_raw="Closed",
+            title="Transient closed utility vehicle",
+        ),
+        observed_at=datetime(2026, 7, 15, 2, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, newer_closed_record)
+
+    database_url = repository._engine.url.render_as_string(hide_password=False)
+    config = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    repository._engine.dispose()
+    command.downgrade(config, "20260716_02")
+    legacy_engine = create_postgres_engine(database_url)
+    try:
+        with legacy_engine.begin() as connection:
+            connection.execute(
+                update(auction_items)
+                .where(auction_items.c.source_id == open_record.source_id)
+                .values(
+                    status=AuctionStatus.OPEN.value,
+                    closed_at=None,
+                )
+            )
+    finally:
+        legacy_engine.dispose()
+    try:
+        command.upgrade(config, "20260716_03")
+        engine = create_postgres_engine(database_url)
+        try:
+            with engine.connect() as connection:
+                item = connection.execute(select(auction_items)).mappings().one()
+        finally:
+            engine.dispose()
+        assert item["status"] == AuctionStatus.OPEN.value
+        assert item["current_observation_hash"] == open_record.observation_hash
+        assert item["current_observation_hash"] != newer_closed_record.observation_hash
+    finally:
+        command.upgrade(config, "head")
+
+
 def test_current_observation_hash_migration_rejects_ambiguous_history(
     repository: AuctionRepository,
 ) -> None:
