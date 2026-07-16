@@ -1,6 +1,6 @@
 import pytest
 
-from bc_auction.urls import canonicalize_source_url, normalize_public_url
+from bc_auction.urls import canonicalize_source_url, extract_source_dis_id, normalize_public_url
 
 
 def test_normalize_public_url_removes_session_ids_and_sorts_query_pairs() -> None:
@@ -68,3 +68,12 @@ def test_canonicalize_source_url_rejects_an_embedded_session_id() -> None:
 def test_canonicalize_source_url_rejects_invalid_identity_urls(url: str, error: str) -> None:
     with pytest.raises(ValueError, match=error):
         canonicalize_source_url(url)
+
+
+def test_extract_source_dis_id_uses_the_canonical_display_id() -> None:
+    assert (
+        extract_source_dis_id(
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643"
+        )
+        == "8733643"
+    )

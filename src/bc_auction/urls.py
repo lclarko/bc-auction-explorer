@@ -58,6 +58,17 @@ def canonicalize_source_url(url: str) -> str:
     )
 
 
+def extract_source_dis_id(canonical_url: str) -> str:
+    """Extract the stable display ID from a canonical BC Auction item URL."""
+    normalized_url = canonicalize_source_url(canonical_url)
+    display_ids = [
+        value for name, value in parse_qsl(urlsplit(normalized_url).query) if name == "disID"
+    ]
+    if len(display_ids) != 1:
+        raise ValueError("canonical item URL did not contain one display ID")
+    return display_ids[0]
+
+
 def _contains_session_marker(value: str) -> bool:
     decoded_value = value
     for _ in range(3):
