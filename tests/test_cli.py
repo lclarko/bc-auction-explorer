@@ -1,6 +1,8 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
+from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 import pytest
@@ -8,7 +10,12 @@ import pytest
 import bc_auction.__main__ as cli
 from bc_auction.client import FetchedPage
 from bc_auction.errors import ParserContractError
-from bc_auction.persistence import PersistenceError, PersistResult, ScrapeRunStatus
+from bc_auction.persistence import (
+    IdentityConflictError,
+    PersistenceError,
+    PersistResult,
+    ScrapeRunStatus,
+)
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _RESULTS_URL = "https://www.bcauction.ca/open.dll/submitDocSearch"
@@ -43,6 +50,24 @@ class _SuccessfulClient:
     def get_item_detail(self, source_url: str) -> FetchedPage:
         assert source_url.startswith("https://www.bcauction.ca/open.dll/showDisplayDocument?")
         return _page("item-detail.html", _DETAIL_URL)
+
+
+class _TwoRecordClient(_SuccessfulClient):
+    _SOURCE_IDS: ClassVar[dict[str, str]] = {"8733643": "A277437", "8734455": "A277501"}
+
+    def get_item_detail(self, source_url: str) -> FetchedPage:
+        source_dis_id = parse_qs(urlparse(source_url).query)["disID"][0]
+        source_id = self._SOURCE_IDS[source_dis_id]
+        return FetchedPage(
+            url=_DETAIL_URL,
+            status_code=200,
+            body=(_FIXTURES / "item-detail.html").read_bytes().replace(
+                b"A277437",
+                source_id.encode(),
+            ),
+            content_type="text/html; charset=utf-8",
+            fetched_at=datetime.now(UTC),
+        )
 
 
 def test_manual_scrape_prints_redacted_structured_output(monkeypatch, capsys) -> None:
@@ -129,10 +154,19 @@ def test_persist_requires_a_database_url_before_opening_the_source_client(
 class _FakePersistenceRepository:
     run_id = UUID("00000000-0000-0000-0000-000000000001")
 
-    def __init__(self, *, persist_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        persist_error: bool = False,
+        identity_conflict_at: int | None = None,
+        finish_error: bool = False,
+    ) -> None:
         self.persist_error = persist_error
+        self.identity_conflict_at = identity_conflict_at
+        self.finish_error = finish_error
         self.finished: list[tuple[ScrapeRunStatus, object]] = []
         self.started = False
+        self.persist_calls = 0
 
     def ping(self) -> None:
         return None
@@ -142,6 +176,9 @@ class _FakePersistenceRepository:
         return self.run_id
 
     def persist_reconciled_record(self, *args: object, **kwargs: object) -> PersistResult:
+        self.persist_calls += 1
+        if self.identity_conflict_at == self.persist_calls:
+            raise IdentityConflictError("canonical auction identity belongs to another source ID")
         if self.persist_error:
             raise PersistenceError("database rejected auction persistence")
         return PersistResult(created=True, updated=False, observation_created=True)
@@ -149,11 +186,16 @@ class _FakePersistenceRepository:
     def finish_scrape_run(self, run_id: UUID, **kwargs: object) -> None:
         assert run_id == self.run_id
         self.finished.append((kwargs["status"], kwargs["counts"]))
+        if self.finish_error:
+            raise RuntimeError("database unavailable")
 
 
 class _FakePersistenceEngine:
+    def __init__(self) -> None:
+        self.disposed = False
+
     def dispose(self) -> None:
-        return None
+        self.disposed = True
 
 
 def test_persist_creates_and_finishes_a_successful_scrape_run(monkeypatch, capsys) -> None:
@@ -162,7 +204,7 @@ def test_persist_creates_and_finishes_a_successful_scrape_run(monkeypatch, capsy
     monkeypatch.setattr(
         cli,
         "_open_repository",
-        lambda database_url: (repository, _FakePersistenceEngine()),
+        lambda _database_url: (repository, _FakePersistenceEngine()),
     )
 
     exit_code = cli.main(["scrape", "--limit", "1", "--persist", "--database-url", "postgresql://x"])
@@ -182,7 +224,7 @@ def test_persist_marks_storage_failure_as_a_partial_run(monkeypatch, capsys) -> 
     monkeypatch.setattr(
         cli,
         "_open_repository",
-        lambda database_url: (repository, _FakePersistenceEngine()),
+        lambda _database_url: (repository, _FakePersistenceEngine()),
     )
 
     exit_code = cli.main(["scrape", "--limit", "1", "--persist", "--database-url", "postgresql://x"])
@@ -193,6 +235,53 @@ def test_persist_marks_storage_failure_as_a_partial_run(monkeypatch, capsys) -> 
     assert output["failures"][0]["error"] == "persistence failed"
     assert repository.finished[0][0] is ScrapeRunStatus.PARTIAL
     assert repository.finished[0][1].item_failures == 1
+
+
+def test_persist_preserves_committed_counts_after_an_identity_conflict(monkeypatch, capsys) -> None:
+    repository = _FakePersistenceRepository(identity_conflict_at=2)
+    engine = _FakePersistenceEngine()
+    monkeypatch.setattr(cli, "AuctionClient", _TwoRecordClient)
+    monkeypatch.setattr(cli, "_open_repository", lambda _database_url: (repository, engine))
+
+    exit_code = cli.main(["scrape", "--limit", "2", "--persist", "--database-url", "postgresql://x"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "persistence batch had an identity conflict" in captured.err
+    assert repository.finished[0][0] is ScrapeRunStatus.FAILED
+    assert repository.finished[0][1].items_created == 1
+    assert repository.finished[0][1].observations_created == 1
+    assert repository.finished[0][1].item_failures == 1
+    assert engine.disposed is True
+
+
+def test_failed_run_finalization_does_not_mask_the_scrape_error(monkeypatch, capsys) -> None:
+    class FailingSearchClient(_SuccessfulClient):
+        def search_open_auctions(
+            self,
+            *,
+            keyword: str = "",
+            display_order: str = "EndingFirst",
+        ) -> FetchedPage:
+            raise ParserContractError("invalid search results")
+
+    repository = _FakePersistenceRepository(finish_error=True)
+    engine = _FakePersistenceEngine()
+    monkeypatch.setattr(cli, "AuctionClient", FailingSearchClient)
+    monkeypatch.setattr(cli, "_open_repository", lambda _database_url: (repository, engine))
+
+    exit_code = cli.main(["scrape", "--persist", "--database-url", "postgresql://x"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert "scrape run finalization failed: RuntimeError" in captured.err
+    assert "scrape failed: invalid search results" in captured.err
+    assert repository.finished[0][0] is ScrapeRunStatus.FAILED
+    assert repository.finished[0][1].items_created == 0
+    assert repository.finished[0][1].observations_created == 0
+    assert engine.disposed is True
 
 
 def test_manual_scrape_writes_atomic_json_output(monkeypatch, capsys, tmp_path: Path) -> None:

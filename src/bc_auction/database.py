@@ -43,6 +43,11 @@ scrape_runs = Table(
     Column("error_summary", Text),
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('running', 'succeeded', 'partial', 'failed')"),
+    CheckConstraint(
+        "(status = 'running' AND finished_at IS NULL) OR "
+        "(status IN ('succeeded', 'partial', 'failed') AND finished_at IS NOT NULL)",
+        name="ck_scrape_runs_status_finished_at",
+    ),
 )
 
 auction_items = Table(
@@ -69,6 +74,7 @@ auction_items = Table(
     Column("last_changed_at", DateTime(timezone=True), nullable=False),
     Column("closed_at", DateTime(timezone=True)),
     Column("metadata_hash", String(64), nullable=False),
+    Column("current_observation_hash", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('open', 'closed', 'withdrawn', 'unknown')"),

@@ -55,6 +55,17 @@ class _ScrapeOutcome:
     items_seen: int
 
 
+class _PersistenceBatchFailure(RuntimeError):
+    def __init__(
+        self,
+        results: list[PersistResult],
+        failures: list[dict[str, str]],
+    ) -> None:
+        super().__init__("persistence batch had an identity conflict")
+        self.results = results
+        self.failures = failures
+
+
 def _positive_int(value: str) -> int:
     parsed_value = int(value)
     if parsed_value < 1:
@@ -251,11 +262,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         failures = outcome.failures
         if repository is not None and run_id is not None:
             _validate_persistence_batch(records)
-            persistence_results, persistence_failures = _persist_records(
-                repository,
-                run_id,
-                records,
-            )
+            try:
+                persistence_results, persistence_failures = _persist_records(
+                    repository,
+                    run_id,
+                    records,
+                )
+            except _PersistenceBatchFailure as exc:
+                failures.extend(exc.failures)
+                counts = _scrape_run_counts(outcome, exc.results, len(failures))
+                raise
             failures.extend(persistence_failures)
             counts = _scrape_run_counts(outcome, persistence_results, len(failures))
             from bc_auction.persistence import ScrapeRunStatus
@@ -282,13 +298,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             output["persistence"] = {"scrape_run_id": str(run_id)}
         _write_output(args.output, output)
     except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
-        if repository is not None and run_id is not None and not run_finished:
-            _finish_failed_run(repository, run_id, outcome, counts)
+        _report_failed_run_finalization(repository, run_id, outcome, counts, run_finished)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
-        if repository is not None and run_id is not None and not run_finished:
-            _finish_failed_run(repository, run_id, outcome, counts)
+        _report_failed_run_finalization(repository, run_id, outcome, counts, run_finished)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     finally:
@@ -352,7 +366,14 @@ def _persist_records(
             persisted_record = convert_reconciled_record(record, observed_at=datetime.now(UTC))
             results.append(repository.persist_reconciled_record(run_id, persisted_record))
         except IdentityConflictError:
-            raise
+            failures.append(
+                {
+                    "source_id": record.source_id,
+                    "canonical_source_url": str(record.canonical_source_url),
+                    "error": "persistence identity conflict",
+                }
+            )
+            raise _PersistenceBatchFailure(results, failures) from None
         except PersistenceError:
             failures.append(
                 {
@@ -381,28 +402,46 @@ def _scrape_run_counts(
     )
 
 
+def _report_failed_run_finalization(
+    repository: AuctionRepository | None,
+    run_id: UUID | None,
+    outcome: _ScrapeOutcome | None,
+    counts: ScrapeRunCounts | None,
+    run_finished: bool,
+) -> None:
+    if repository is None or run_id is None or run_finished:
+        return
+    finalization_error = _finish_failed_run(repository, run_id, outcome, counts)
+    if finalization_error is not None:
+        print(f"scrape run finalization failed: {finalization_error}", file=sys.stderr)
+
+
 def _finish_failed_run(
     repository: AuctionRepository,
     run_id: UUID,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
-) -> None:
+) -> str | None:
     from bc_auction.persistence import ScrapeRunCounts, ScrapeRunStatus
 
-    repository.finish_scrape_run(
-        run_id,
-        status=ScrapeRunStatus.FAILED,
-        counts=counts
-        or ScrapeRunCounts(
-            pages_visited=outcome.pages_visited if outcome is not None else 0,
-            items_seen=outcome.items_seen if outcome is not None else 0,
-            items_created=0,
-            items_updated=0,
-            observations_created=0,
-            item_failures=len(outcome.failures) if outcome is not None else 0,
-        ),
-        error_summary="scrape failed",
-    )
+    try:
+        repository.finish_scrape_run(
+            run_id,
+            status=ScrapeRunStatus.FAILED,
+            counts=counts
+            or ScrapeRunCounts(
+                pages_visited=outcome.pages_visited if outcome is not None else 0,
+                items_seen=outcome.items_seen if outcome is not None else 0,
+                items_created=0,
+                items_updated=0,
+                observations_created=0,
+                item_failures=len(outcome.failures) if outcome is not None else 0,
+            ),
+            error_summary="scrape failed",
+        )
+    except Exception as exc:
+        return type(exc).__name__
+    return None
 
 
 if __name__ == "__main__":

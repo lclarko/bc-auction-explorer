@@ -77,3 +77,31 @@ def test_extract_source_dis_id_uses_the_canonical_display_id() -> None:
         )
         == "8733643"
     )
+
+
+def test_extract_source_dis_id_normalizes_navigation_parameters_and_session_values() -> None:
+    first = extract_source_dis_id(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?docType=Tender&"
+        "disID=8733643&doc_search_by=Tend&sessionID=private"
+    )
+    second = extract_source_dis_id(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?session%49D=private&"
+        "doc_search_by=Tend&disID=8733643&dis_version_nos=2"
+    )
+
+    assert first == second == "8733643"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/open.dll/showDisplayDocument?disID=8733643",
+        "https://www.bcauction.ca/open.dll/showDocSummary?disID=8733643",
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2",
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&"
+        "redirect=showDocSummary%3FsessionID%3Dprivate",
+    ],
+)
+def test_extract_source_dis_id_rejects_unstable_or_session_bearing_urls(url: str) -> None:
+    with pytest.raises(ValueError):
+        extract_source_dis_id(url)

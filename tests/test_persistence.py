@@ -1,8 +1,11 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+from pydantic import ValidationError
+
 from bc_auction.models import AuctionDetailRecord, AuctionStatus, LocationStatus
-from bc_auction.persistence import convert_reconciled_record
+from bc_auction.persistence import PersistedAuctionRecord, convert_reconciled_record
 
 
 def _detail(**updates: object) -> AuctionDetailRecord:
@@ -73,3 +76,19 @@ def test_conversion_retains_unknown_locations_without_guessing() -> None:
 
     assert persisted.location_canonical == "Qualicum Beach"
     assert persisted.location_normalization_status is LocationStatus.UNKNOWN
+
+
+def test_persistence_record_rejects_mutated_or_session_bearing_canonical_identity() -> None:
+    persisted = convert_reconciled_record(_detail(), observed_at=datetime(2026, 7, 15, tzinfo=UTC))
+    mismatched_display_id = persisted.model_dump()
+    mismatched_display_id["source_dis_id"] = "9999999"
+    session_bearing_url = persisted.model_dump()
+    session_bearing_url["canonical_source_url"] = (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?"
+        "disID=8733643&sessionID=private"
+    )
+
+    with pytest.raises(ValidationError, match="display ID"):
+        PersistedAuctionRecord.model_validate(mismatched_display_id)
+    with pytest.raises(ValidationError, match="canonical source URL"):
+        PersistedAuctionRecord.model_validate(session_bearing_url)

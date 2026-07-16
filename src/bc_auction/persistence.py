@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import Connection, Engine, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError
@@ -74,6 +74,12 @@ class PersistedAuctionRecord(BaseModel):
         if canonicalize_source_url(value) != value:
             raise ValueError("canonical source URL must be session-free and normalized")
         return value
+
+    @model_validator(mode="after")
+    def require_display_id_matches_canonical_url(self) -> "PersistedAuctionRecord":
+        if extract_source_dis_id(self.canonical_source_url) != self.source_dis_id:
+            raise ValueError("source display ID did not match the canonical source URL")
+        return self
 
     @field_validator("image_urls")
     @classmethod
@@ -281,6 +287,8 @@ class AuctionRepository:
         error_summary: str | None = None,
         finished_at: datetime | None = None,
     ) -> None:
+        if status is ScrapeRunStatus.RUNNING:
+            raise ValueError("running scrape run cannot be finalized")
         with self._engine.begin() as connection:
             connection.execute(
                 update(scrape_runs)
@@ -350,17 +358,34 @@ class AuctionRepository:
             return PersistResult(created=True, updated=False, observation_created=True)
 
         item_id = existing["id"]
-        latest_hash = connection.execute(
-            select(item_observations.c.observation_hash)
-            .where(item_observations.c.auction_item_id == item_id)
-            .order_by(item_observations.c.observed_at.desc(), item_observations.c.id.desc())
-            .limit(1)
-        ).scalar_one_or_none()
+        if (
+            existing["source_dis_id"] != record.source_dis_id
+            or existing["canonical_source_url"] != record.canonical_source_url
+        ):
+            raise IdentityConflictError("source ID changed canonical auction identity")
+        if record.observed_at < existing["last_seen_at"]:
+            observation_created = self._insert_stale_observation_if_new(
+                connection,
+                item_id,
+                run_id,
+                record,
+            )
+            closed_at = _first_terminal_observed_at(existing["closed_at"], record)
+            if closed_at != existing["closed_at"]:
+                connection.execute(
+                    update(auction_items)
+                    .where(auction_items.c.id == item_id)
+                    .values(closed_at=closed_at)
+                )
+            return PersistResult(
+                created=False,
+                updated=False,
+                observation_created=observation_created,
+            )
         metadata_changed = existing["metadata_hash"] != record.metadata_hash
-        observation_changed = latest_hash != record.observation_hash
-        closed_at = existing["closed_at"]
-        if closed_at is None and _is_terminal(record.status):
-            closed_at = now
+        observation_changed = existing["current_observation_hash"] != record.observation_hash
+        closed_at = _first_terminal_observed_at(existing["closed_at"], record)
+        closed_at_changed = closed_at != existing["closed_at"]
 
         connection.execute(
             update(auction_items)
@@ -369,7 +394,9 @@ class AuctionRepository:
                 **item_values,
                 last_seen_at=now,
                 last_changed_at=(
-                    now if metadata_changed or observation_changed else existing["last_changed_at"]
+                    now
+                    if metadata_changed or observation_changed or closed_at_changed
+                    else existing["last_changed_at"]
                 ),
                 closed_at=closed_at,
                 updated_at=now,
@@ -383,6 +410,25 @@ class AuctionRepository:
             updated=metadata_changed or observation_changed,
             observation_created=observation_changed,
         )
+
+    def _insert_stale_observation_if_new(
+        self,
+        connection: Connection,
+        item_id: UUID,
+        run_id: UUID,
+        record: PersistedAuctionRecord,
+    ) -> bool:
+        existing_observation = connection.execute(
+            select(item_observations.c.id).where(
+                item_observations.c.auction_item_id == item_id,
+                item_observations.c.observed_at == record.observed_at,
+                item_observations.c.observation_hash == record.observation_hash,
+            )
+        ).scalar_one_or_none()
+        if existing_observation is not None:
+            return False
+        self._insert_observation(connection, item_id, run_id, record)
+        return True
 
     def _insert_observation(
         self,
@@ -470,11 +516,23 @@ def _item_values(record: PersistedAuctionRecord) -> dict[str, object]:
         "status": record.status.value,
         "status_raw": record.status_raw,
         "metadata_hash": record.metadata_hash,
+        "current_observation_hash": record.observation_hash,
     }
 
 
 def _is_terminal(status: AuctionStatus) -> bool:
     return status in {AuctionStatus.CLOSED, AuctionStatus.WITHDRAWN}
+
+
+def _first_terminal_observed_at(
+    existing_closed_at: datetime | None,
+    record: PersistedAuctionRecord,
+) -> datetime | None:
+    if not _is_terminal(record.status):
+        return existing_closed_at
+    if existing_closed_at is None or record.observed_at < existing_closed_at:
+        return record.observed_at
+    return existing_closed_at
 
 
 def _new_uuid() -> UUID:
