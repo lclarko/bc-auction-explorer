@@ -1,0 +1,375 @@
+<html>
+<!--  Copyright © 2001, 2002 OGMA Consulting Corp. -->
+<!--  open_tenders_basic_content.html -->
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">
+  <meta http-equiv="Expires"       content="-1">
+  <meta http-equiv="Cache-Control" content="no-cache">
+  <meta http-equiv="Pragma"        content="no-cache">
+  <link rel="stylesheet" type="text/css" href="../css/style.css">
+  <link rel="stylesheet" type="text/css" href="../bc/css/style.css">
+  <link rel="stylesheet" type="text/css" href="../bc/css/ext/style.css">
+  <script language="javascript" type="text/javascript" src="../js/netscapeOrIE.js"></script>
+
+<script language="javascript" type="text/javascript" src="../js/numberFcns.js"></script>
+<script language="javascript" type="text/javascript" src="../js/tooltip.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/getSetValues.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/rollover.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/setChanged.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/calendar.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/calendar_ie.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/dateFunctions.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/openWindow.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/resetFields.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/alternateDisplay.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/showHide.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/newWindowSm2.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/makeSafeURL.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/validErrorWindow.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/sendSession.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/showHide.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/changeMenu.js"></script>
+  <script language="javascript" type="text/javascript" src="../js/toggleShowHide.js"></script>
+  <script language="javascript" type="text/javascript">
+    AuctionOpen = new String("AuctionOpen");
+    view0     = new Image ();
+    view0.src = "../bc/images/ext/view0.gif";
+    view1     = new Image ();
+    view1.src = "../bc/images/ext/view1.gif";
+
+    calendar0     = new Image ();
+    calendar0.src = "../bc/images/ext/calendar0.gif";
+    calendar1     = new Image ();
+    calendar1.src = "../bc/images/ext/calendar1.gif";
+
+    OpenDocument0     = new Image ();
+    OpenDocument0.src = "../bc/images/ext/OpenDocument0.gif";
+    OpenDocument1     = new Image ();
+    OpenDocument1.src = "../bc/images/ext/OpenDocument1.gif";
+
+    function appendDates(URL) {
+      var sessionID    = getValueByName("sessionID");
+      var content      = eval('parent._' + sessionID + 'content');
+      content.location = URL + '&beg_date=' + getValueByName("beg_date") + '&end_date=' + getValueByName("end_date");
+    }
+
+  </script>
+  <title>Browse Auctions</title>
+</head>
+<body onLoad="setLanguage('En');_hideDetails();hide('legend');hide('minus');show('plus');" leftmargin="0" topmargin="0" marginwidth="0" marginheight="0">
+<form autocomplete="off" action="submitDocSearch" onSubmit="showWorking()" method=post>
+<input type="hidden" name="doc_search_by" value='TendSimp'>
+<input type="hidden" name="searchResult" value="True">
+<input type="hidden" name="isChanged" value="no">
+<input type="hidden" name="dllAnchor" value="allOpenOpportunities">
+<input type="Hidden" name="productDisID" value="simpleAll">
+<input type="Hidden" name="productDesc" value="Browse All Open Auctions">
+<input type="Hidden" name="UseProfile" values="">
+<input type="Hidden" name="drillProductDisID" value="">
+<input type="Hidden" name="AuctionNew_help" value="This is a new auction that you have not viewed before">
+<input type="Hidden" name="AuctionChanged_help" value="This is an amended auction notice">
+<input type="Hidden" name="AuctionOpen_help" value="This is a currently open auction">
+<input type="hidden" name="dllPage"             value="open_tenders_basic_content.html">
+<input type="hidden" name="dllAnchor_pageLevel" value="pageLevel">
+
+<!-- working begin -->
+<script language="javascript" type="text/javascript">
+  function showWorking() {
+    field = document.getElementById('notWorking');
+    field.style.left = '-1000px';
+    field.style.top = '-1000px';
+    field = document.getElementById('working');
+    field.style.left = '0px';
+    field.style.top = '40%';
+  }
+  function hideWorking() {
+    field = document.getElementById('notWorking');
+    field.style.left = '0px';
+    field.style.top = '0px';
+    field = document.getElementById('working');
+    field.style.left = '-1000px';
+    field.style.top = '-1000px';
+  }
+</script>
+<!-- working HTML -->
+<div id=working style="position:absolute;left:-1000">
+<table width="575">
+  <tr>
+    <td style="text-align:center; vertical-align:middle">
+      <span class="working">Working...</span>
+    </td>
+  </tr>
+</table>
+</div>
+<!-- working HTML -->
+<!-- <~LBL_WORKING> -->
+
+<div id=notWorking style="position:absolute;top:0;left:0">
+
+<table width="595" border=0 cellpadding=0 cellspacing=0>
+  <tr>
+    <td colspan=3><img src="../images/spacer.gif" width=1 height=15></td>
+  </tr>
+  <tr>
+    <td><img src="../images/spacer.gif" width=20 height=1></td>
+    <td width="575">
+
+
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td><span class="pageTitle">Browse Auctions</span><br>
+      <span class="env">&nbsp;</span></td>
+    <td><img src="../images/spacer.gif" width=10 height=51></td>
+  </tr>
+  <tr>
+    <td colspan=3><img src="../images/spacer.gif" width="1" height="10"></td>
+  </tr>
+</table>
+
+
+<table width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr>
+    <td>
+      <table width="100%" cellspacing="0" cellpadding="0" border="0">
+  <tr>
+    <td>
+    <table width="100%" cellspacing="0" cellpadding="0" border="0">
+      <tr>
+        <td width=40%>
+<a class="navigation"  href="showWorking?sessionID=SESSION_ID&redirect=showDocumentSearch?doc_search_by=TendSimp^||^catalogueType=SystemCatalogue^||^sessionID=SESSION_ID^||^display_order=EndingFirst" onmouseover="rollover('bc/images/ext/', 'arrow', 'arrow', '1')" onmouseout="rollover('bc/images/ext/', 'arrow', 'arrow', '0')"><img src="../bc/images/ext/arrow0.gif"border="0" name="arrow" align="absmiddle">&nbsp;Back&nbsp;</a>        </td>
+        <td>
+        <table width="100%" cellspacing="0" cellpadding="0" border="0">
+          <tr>
+            <td width=1><a href="javascript:toggleShowHide('legend'); toggleShowHide('minus'); toggleShowHide('plus');"><script language="javascript" type="text/javascript">
+  if (isIE) {
+    document.write('<img style="display:none" name=minus id=minus src="../images/boxMinus.gif">');
+    document.write('<img style="display:block" name=plus id=plus src="../images/boxPlus.gif">');
+  } else {
+    document.write('<img name=minus id=minus src="../images/boxMinus.gif">');
+    document.write('<img name=plus id=plus src="../images/boxPlus.gif">');
+  }
+</script></a></td>
+            <td class=smText><img src="../images/spacer.gif" width="5" height="1">Legend</td>
+          </tr>
+<script language="javascript" type="text/javascript">
+  if (isIE) {
+    document.writeln('<tr style="display: none" name="legend" id="legend" >');
+  } else {
+    document.writeln('<tr name="legend" id="legend" >');
+  }
+</script>
+            <td>&nbsp;</td>
+            <td>
+            <table width="100%" cellspacing="0" cellpadding="0" border="0">
+              <tr>
+                <td class=smText>
+<img src="../bc/images/new1.gif"><img src="../images/spacer.gif" width="10" height="1">Auction is new since your last logon.                </td>
+              </tr>
+              <tr>
+                <td class=smText>
+<img src="../bc/images/changed1.gif" width=17 height=14><img src="../images/spacer.gif" width="10" height="1">Auction has changed since your last logon.                </td>
+              </tr>
+              <tr>
+                <td class=smText>
+<img src="../bc/images/open_withdrawn1.gif" width=17 height=14><img src="../images/spacer.gif" width="10" height="1">Auction is withdrawn.                </td>
+              </tr>
+              <tr>
+                <td class=smText>
+<img src="../bc/images/OpenDocument0.gif" width=17 height=14><img src="../images/spacer.gif" width="10" height="1">Auction is open.                </td>
+              </tr>
+              <tr>
+                  <td class=smText>
+                  <img src="../bc/images/earth.gif">                  <img src="../images/spacer.gif" width="10" height="1">Auction being sold from site                  </td>
+              </tr>
+            </table>
+            </td>
+          </tr>
+        </table>
+        </td>
+      </tr>
+    </table>
+    </td>
+  </tr>
+  <tr>
+    <td height=10><img src="../images/spacer.gif" width="1" height="10"></td>
+  </tr>
+  <tr>
+    <td class=subheading>Browse All Open Auctions&nbsp;<a tabindex="-1" href="javascript:;" onClick="window.open('showHelpTopic?sessionID=SESSION_ID&language=En&dllPage=open_tenders_basic_content.html&dllAnchor=allOpenOpportunities', 'SESSION_ID_helptopic', 'scrollbars,status,resizable=yes,width=416,height=310')"><img src="../bc/images/ext/icon_topic_help.gif" border="0" align="absmiddle"></a></td>
+  </tr>
+  <tr>
+    <td>
+    <table width="100%" cellspacing="0" cellpadding="0" border="0">
+      <tr>
+        <td width=5>&nbsp;<input type=hidden value="simpleAll"></td>
+      </tr>
+    </table>
+    </td>
+  </tr>
+</table>
+
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <table width="100%" border="0" cellspacing="0" cellpadding="0" background="../images/ln_dot_grey_wh.gif">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="1"></td>
+  </tr>
+</table>
+
+    </td>
+    <td><img src="../images/spacer.gif" width=1 height=15></td>
+  </tr>
+        <tr>
+        <td><span class=regtext>Select Display Order</span>&nbsp;<a tabindex="-1" href="javascript:;" onClick="window.open('showHelpTopic?sessionID=SESSION_ID&language=En&dllPage=open_tenders_basic_content.html&dllAnchor=validate', 'SESSION_ID_helptopic', 'scrollbars,status,resizable=yes,width=416,height=310')"><img src="../bc/images/ext/icon_topic_help.gif" border="0" align="absmiddle"></a>        <select name=display_order onChange="javascript:submit();">  <option selected value="EndingFirst">Ending First
+  <option value="EndingLast">Ending Last
+  <option value="HighestPrice">Highest Price
+  <option value="LowestPrice">Lowest Price
+  <option value="PublishDate">Publish Date (latest first)</select></td>
+      </tr>
+
+  <tr>
+    <td height="100">
+
+    <table cellspacing="0" cellpadding="0" border="0" width="100%">
+
+
+  <tr>
+    <td width="100%">
+      <table width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="15"></td>
+  </tr>
+</table>
+<table width="100%" border="0" cellspacing="0" cellpadding="0" background="../images/ln_dot_grey_wh.gif">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="1"></td>
+  </tr>
+</table>
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="5"></td>
+  </tr>
+</table>
+
+    </td>
+  </tr>
+  <tr>
+    <td width="100%"><span class=boldText>There were no results for the specified search.</span></td>
+  </tr>
+  <tr>
+    <td width="100%">
+      <table width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="5"></td>
+  </tr>
+</table>
+<table width="100%" border="0" cellspacing="0" cellpadding="0" background="../images/ln_dot_grey_wh.gif">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="1"></td>
+  </tr>
+</table>
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+  <tr>
+    <td><img src="../images/spacer.gif" width="1" height="15"></td>
+  </tr>
+</table>
+
+    </td>
+  </tr>
+
+
+    </table>
+
+    </td>
+  </tr>
+
+</table>
+
+    </td>
+    <td><img src="../images/spacer.gif" width=1 height=1></td>
+  </tr>
+  <tr>
+    <td colspan=3><img src="../images/spacer.gif" width=1 height=15></td>
+  </tr>
+</table>
+
+
+</div>
+
+
+<script language="javascript" type="text/javascript">
+  function _showDetails() { alternateDisplay('show', 'infoDetail', 'info', 'showSummary', 'showDetails') }
+  function _hideDetails() { alternateDisplay('hide', 'infoDetail', 'info', 'showSummary', 'showDetails')}
+</script>
+<!-- <~LBL_Show_Details> <~LBL_Hide_Details> -->
+<!-- Do not remove the following tags
+  <~LBL_RefId>
+  <~LBL_Customer>
+  <~LBL_IssueDate>
+  <~LBL_ClosingDate>
+  <~LBL_NoDocumentRefId>
+  <~LBL_EmptySearch>
+  <~LBL_Interested>
+  <~LBL_Invited>
+  <~LBL_Attachments>
+  <~LBL_Show>
+  <~LBL_Hide>
+  <~LBL_Back>
+  <~LBL_DocumentType>
+  <~LBL_Amendment_No>
+  <~LBL_Qualifier>
+  <~LBL_Organization_Name>
+  <~LBL_Required_Date>
+  <~LBL_Document_Title>
+  <~LBL_Current_Step>
+  <~LBL_Document_No>
+  <~LBL_Document_Date>
+  <~LBL_PublishedDate>
+  <~LBL_IssuedDate>
+  <~LBL_CompletedDate>
+  <~LBL_Responsible>
+  <~LBL_Awards_Exist>
+  <~LBL_TenderNum>
+  <~LBL_Error>
+  <~LBL_Tender_Issue_Date>
+  <~LBL_Tender_Closing_Date>
+  <~LBL_DateRange>
+  <~LBL_Date_Format>
+  <~LBL_And>
+  <~LBL_All>
+  <~LBL_Gsin_Help>
+  <~LBL_Beg_Date_Help>
+  <~LBL_End_Date_Help>
+  <~LBL_Help>
+  <~LBL_Previous>
+  <~LBL_Next>
+  <~LBL_Advanced_Search>
+  <~LBL_Browse_MyProfile>
+  <~LBL_Browse_MyProfile_Help>
+  <~LBL_VendorHasNoProfile>
+  <~LBL_Withdrawn>
+  <~LBL_Legend>
+  <~LBL_New>
+  <~LBL_Changed>
+  <~LBL_Open>
+  <~LBL_OpenWithdrawn>
+  <~LBL_Browse_By_Org>
+  <~LBL_Browse_By_Org_Help>
+  <~LBL_BrowseAllOpen_Help>
+  <~LBL_AdvancedSearch_Desc>
+ -->
+
+<!-- form closed in footer --><input type="hidden" name="sessionID" value="SESSION_ID">
+</form>
+  <script language="javascript" type="text/javascript" src="../js/cookie.js"></script>
+  <script language="javascript" type="text/javascript">
+
+    addSessionId("SESSION_ID");
+
+    if (document.cookie == "") {
+      document.location = "showErrorDisplay?sessionID=SESSION_ID&messageType=Warning&errorMessage=ValErr0001&sourceType=JavaScript";
+    }
+  </script>
+</body>
+</html>
