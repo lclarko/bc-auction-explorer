@@ -420,7 +420,7 @@ def test_api_returns_stable_errors_without_database_details(
     }
 
 
-@pytest.mark.parametrize("parameter", ("min_price", "max_price"))
+@pytest.mark.parametrize("parameter", ["min_price", "max_price"])
 def test_api_rejects_price_filter_outside_storage_range(
     client: TestClient,
     parameter: str,
@@ -431,3 +431,13 @@ def test_api_rejects_price_filter_outside_storage_range(
     payload = response.json()
     assert payload["error"]["code"] == "validation_error"
     assert "input" not in payload["error"]["details"][0]
+
+
+@pytest.mark.parametrize("parameter", ["min_price", "max_price"])
+def test_api_accepts_largest_persistable_price_filter(
+    client: TestClient,
+    parameter: str,
+) -> None:
+    response = client.get("/api/listings", params={parameter: "999999999999.99"})
+
+    assert response.status_code == 200
