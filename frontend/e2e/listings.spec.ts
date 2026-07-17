@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-const listing = {
+const firstListing = {
   bid_count: 0,
   canonical_source_url: "https://www.bcauction.ca/open?id=ABC-123",
   closing_at: "2026-07-20T19:00:00Z",
@@ -17,6 +17,15 @@ const listing = {
   title: "Surplus office chair",
 };
 
+const secondListing = {
+  ...firstListing,
+  bid_count: 3,
+  canonical_source_url: "https://www.bcauction.ca/open?id=XYZ-456",
+  current_bid: "25.00",
+  source_id: "XYZ-456",
+  title: "Surplus filing cabinet",
+};
+
 async function mockApi(page: Page): Promise<URL[]> {
   const listingRequestUrls: URL[] = [];
   await page.route("**/api/**", async (route) => {
@@ -26,9 +35,10 @@ async function mockApi(page: Page): Promise<URL[]> {
 
     if (url.pathname === "/api/listings") {
       listingRequestUrls.push(url);
+      const requestedPage = Number(url.searchParams.get("page") ?? "1");
       await respond({
-        items: [listing],
-        page_info: { page: 1, page_size: 25, total_items: 1, total_pages: 1 },
+        items: requestedPage === 2 ? [secondListing] : [firstListing],
+        page_info: { page: requestedPage, page_size: 25, total_items: 2, total_pages: 2 },
       });
       return;
     }
@@ -42,7 +52,7 @@ async function mockApi(page: Page): Promise<URL[]> {
     }
     if (url.pathname === "/api/scrape-status") {
       await respond({
-        latest_listing_seen_at: listing.last_seen_at,
+        latest_listing_seen_at: firstListing.last_seen_at,
         latest_run: null,
         latest_successful_run: null,
         listing_count: 1,
@@ -51,7 +61,7 @@ async function mockApi(page: Page): Promise<URL[]> {
     }
     if (url.pathname === "/api/listings/ABC-123") {
       await respond({
-        ...listing,
+        ...firstListing,
         category: "Office",
         category_canonical: null,
         category_raw: "Office",
@@ -81,6 +91,18 @@ test("browses, filters, opens a detail page, and returns to results", async ({ p
   await page.getByRole("searchbox", { name: "Keyword" }).fill("chair");
   await page.getByRole("button", { name: "Apply filters" }).click();
   await expect(page).toHaveURL(/keyword=chair/);
+  await expect.poll(() => listingRequestUrls.at(-1)?.searchParams.get("keyword")).toBe("chair");
+
+  await page.getByRole("button", { name: "Next" }).click();
+  await expect(page).toHaveURL(/keyword=chair.*page=2/);
+  await expect(page.getByRole("heading", { name: "Surplus filing cabinet" })).toBeVisible();
+  await expect.poll(() => listingRequestUrls.at(-1)?.searchParams.get("page")).toBe("2");
+  await expect.poll(() => listingRequestUrls.at(-1)?.searchParams.get("keyword")).toBe("chair");
+
+  await page.getByRole("button", { name: "Previous" }).click();
+  await expect(page).toHaveURL(/keyword=chair/);
+  await expect(page.getByRole("heading", { name: "Surplus office chair" })).toBeVisible();
+  await expect.poll(() => listingRequestUrls.at(-1)?.searchParams.get("page")).toBe("1");
   await expect.poll(() => listingRequestUrls.at(-1)?.searchParams.get("keyword")).toBe("chair");
 
   await page.getByRole("link", { name: "View details" }).click();
