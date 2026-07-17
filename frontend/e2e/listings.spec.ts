@@ -38,7 +38,7 @@ async function mockApi(page: Page): Promise<URL[]> {
       const requestedPage = Number(url.searchParams.get("page") ?? "1");
       await respond({
         items: requestedPage === 2 ? [secondListing] : [firstListing],
-        page_info: { page: requestedPage, page_size: 25, total_items: 2, total_pages: 2 },
+        page_info: { page: requestedPage, page_size: 1, total_items: 2, total_pages: 2 },
       });
       return;
     }
