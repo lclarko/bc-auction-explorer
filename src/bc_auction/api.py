@@ -33,6 +33,7 @@ _MAX_PAGE_SIZE = 100
 _DEFAULT_FACET_LIMIT = 100
 _MAX_FACET_LIMIT = 500
 _MAX_PAGE = 10_000
+_MAX_BID_VALUE = Decimal("999999999999.99")
 
 
 def create_app(
@@ -83,8 +84,8 @@ def create_app(
         location: Annotated[str | None, Query(max_length=200)] = None,
         category: Annotated[str | None, Query(max_length=200)] = None,
         status: AuctionStatus | None = None,
-        min_price: Annotated[Decimal | None, Query(ge=0)] = None,
-        max_price: Annotated[Decimal | None, Query(ge=0)] = None,
+        min_price: Annotated[Decimal | None, Query(ge=0, le=_MAX_BID_VALUE)] = None,
+        max_price: Annotated[Decimal | None, Query(ge=0, le=_MAX_BID_VALUE)] = None,
         closing_after: datetime | None = None,
         closing_before: datetime | None = None,
         sort: ListingSort = ListingSort.CLOSING_SOON,

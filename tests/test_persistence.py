@@ -92,3 +92,8 @@ def test_persistence_record_rejects_mutated_or_session_bearing_canonical_identit
         PersistedAuctionRecord.model_validate(mismatched_display_id)
     with pytest.raises(ValidationError, match="canonical source URL"):
         PersistedAuctionRecord.model_validate(session_bearing_url)
+
+
+def test_detail_record_rejects_credential_bearing_image_url() -> None:
+    with pytest.raises(ValidationError, match="embedded credentials"):
+        _detail(image_urls=("https://user:secret@www.bcauction.ca/Pictures/8733643.jpg",))

@@ -9,6 +9,8 @@ _SESSION_MARKER = "sessionid="
 def normalize_public_url(url: str) -> str:
     """Normalize a public URL while refusing embedded live session values."""
     parsed = urlsplit(url)
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("public URL contained embedded credentials")
     if _contains_session_marker(parsed.netloc) or _contains_session_marker(parsed.path):
         raise ValueError("public URL contained an embedded session ID")
 
