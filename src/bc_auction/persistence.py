@@ -244,6 +244,18 @@ class ScrapeRunCounts:
     item_failures: int
 
 
+@dataclass(frozen=True, slots=True)
+class ScrapeRunMetrics:
+    source_requests: int = 0
+    source_responses: int = 0
+    source_retries: int = 0
+    rate_limit_responses: int = 0
+    source_transport_errors: int = 0
+    source_request_duration_ms: int = 0
+    source_request_wait_duration_ms: int = 0
+    source_retry_wait_duration_ms: int = 0
+
+
 class AuctionRepository:
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
@@ -284,11 +296,13 @@ class AuctionRepository:
         *,
         status: ScrapeRunStatus,
         counts: ScrapeRunCounts,
+        metrics: ScrapeRunMetrics | None = None,
         error_summary: str | None = None,
         finished_at: datetime | None = None,
     ) -> None:
         if status is ScrapeRunStatus.RUNNING:
             raise ValueError("running scrape run cannot be finalized")
+        final_metrics = metrics or ScrapeRunMetrics()
         with self._engine.begin() as connection:
             connection.execute(
                 update(scrape_runs)
@@ -302,6 +316,14 @@ class AuctionRepository:
                     items_updated=counts.items_updated,
                     observations_created=counts.observations_created,
                     item_failures=counts.item_failures,
+                    source_requests=final_metrics.source_requests,
+                    source_responses=final_metrics.source_responses,
+                    source_retries=final_metrics.source_retries,
+                    rate_limit_responses=final_metrics.rate_limit_responses,
+                    source_transport_errors=final_metrics.source_transport_errors,
+                    source_request_duration_ms=final_metrics.source_request_duration_ms,
+                    source_request_wait_duration_ms=final_metrics.source_request_wait_duration_ms,
+                    source_retry_wait_duration_ms=final_metrics.source_retry_wait_duration_ms,
                     error_summary=error_summary,
                 )
             )

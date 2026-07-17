@@ -122,6 +122,14 @@ class AuctionReadRepository:
             scrape_runs.c.items_updated,
             scrape_runs.c.observations_created,
             scrape_runs.c.item_failures,
+            scrape_runs.c.source_requests,
+            scrape_runs.c.source_responses,
+            scrape_runs.c.source_retries,
+            scrape_runs.c.rate_limit_responses,
+            scrape_runs.c.source_transport_errors,
+            scrape_runs.c.source_request_duration_ms,
+            scrape_runs.c.source_request_wait_duration_ms,
+            scrape_runs.c.source_retry_wait_duration_ms,
         )
         latest_run_statement = select(*run_columns).order_by(
             scrape_runs.c.started_at.desc(),
@@ -345,6 +353,14 @@ def _scrape_run_from_row(row: RowMapping) -> ScrapeRunSummary:
             "items_updated": row["items_updated"],
             "observations_created": row["observations_created"],
             "item_failures": row["item_failures"],
+            "source_requests": row["source_requests"],
+            "source_responses": row["source_responses"],
+            "source_retries": row["source_retries"],
+            "rate_limit_responses": row["rate_limit_responses"],
+            "source_transport_errors": row["source_transport_errors"],
+            "source_request_duration_ms": row["source_request_duration_ms"],
+            "source_request_wait_duration_ms": row["source_request_wait_duration_ms"],
+            "source_retry_wait_duration_ms": row["source_retry_wait_duration_ms"],
         }
     )
 

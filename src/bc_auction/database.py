@@ -40,6 +40,14 @@ scrape_runs = Table(
     Column("items_updated", Integer, nullable=False, server_default="0"),
     Column("observations_created", Integer, nullable=False, server_default="0"),
     Column("item_failures", Integer, nullable=False, server_default="0"),
+    Column("source_requests", Integer, nullable=False, server_default="0"),
+    Column("source_responses", Integer, nullable=False, server_default="0"),
+    Column("source_retries", Integer, nullable=False, server_default="0"),
+    Column("rate_limit_responses", Integer, nullable=False, server_default="0"),
+    Column("source_transport_errors", Integer, nullable=False, server_default="0"),
+    Column("source_request_duration_ms", Integer, nullable=False, server_default="0"),
+    Column("source_request_wait_duration_ms", Integer, nullable=False, server_default="0"),
+    Column("source_retry_wait_duration_ms", Integer, nullable=False, server_default="0"),
     Column("parser_version", String(64), nullable=False),
     Column("error_summary", Text),
     Column("created_at", DateTime(timezone=True), nullable=False),
@@ -48,6 +56,29 @@ scrape_runs = Table(
         "(status = 'running' AND finished_at IS NULL) OR "
         "(status IN ('succeeded', 'partial', 'failed') AND finished_at IS NOT NULL)",
         name="ck_scrape_runs_status_finished_at",
+    ),
+    CheckConstraint("source_requests >= 0", name="ck_scrape_runs_source_requests_nonnegative"),
+    CheckConstraint("source_responses >= 0", name="ck_scrape_runs_source_responses_nonnegative"),
+    CheckConstraint("source_retries >= 0", name="ck_scrape_runs_source_retries_nonnegative"),
+    CheckConstraint(
+        "rate_limit_responses >= 0",
+        name="ck_scrape_runs_rate_limit_responses_nonnegative",
+    ),
+    CheckConstraint(
+        "source_transport_errors >= 0",
+        name="ck_scrape_runs_source_transport_errors_nonnegative",
+    ),
+    CheckConstraint(
+        "source_request_duration_ms >= 0",
+        name="ck_scrape_runs_source_request_duration_ms_nonnegative",
+    ),
+    CheckConstraint(
+        "source_request_wait_duration_ms >= 0",
+        name="ck_scrape_runs_source_request_wait_duration_ms_nonnegative",
+    ),
+    CheckConstraint(
+        "source_retry_wait_duration_ms >= 0",
+        name="ck_scrape_runs_source_retry_wait_duration_ms_nonnegative",
     ),
 )
 

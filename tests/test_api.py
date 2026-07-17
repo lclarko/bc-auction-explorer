@@ -1,4 +1,5 @@
 from collections.abc import Iterator
+from dataclasses import asdict
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -12,6 +13,7 @@ from bc_auction.persistence import (
     AuctionRepository,
     ScrapeRunCounts,
     ScrapeRunInput,
+    ScrapeRunMetrics,
     ScrapeRunStatus,
     convert_reconciled_record,
 )
@@ -81,7 +83,12 @@ def _run(repository: AuctionRepository) -> object:
     )
 
 
-def _finish(repository: AuctionRepository, run_id: object) -> None:
+def _finish(
+    repository: AuctionRepository,
+    run_id: object,
+    *,
+    metrics: ScrapeRunMetrics | None = None,
+) -> None:
     repository.finish_scrape_run(
         run_id,
         status=ScrapeRunStatus.SUCCEEDED,
@@ -93,6 +100,7 @@ def _finish(repository: AuctionRepository, run_id: object) -> None:
             observations_created=3,
             item_failures=0,
         ),
+        metrics=metrics,
         finished_at=datetime(2026, 7, 16, 1, tzinfo=UTC),
     )
 
@@ -346,7 +354,17 @@ def test_facets_and_scrape_status_exclude_persistence_details(
         ),
         observed_at=datetime(2026, 7, 16, tzinfo=UTC),
     )
-    _finish(repository, run_id)
+    metrics = ScrapeRunMetrics(
+        source_requests=11,
+        source_responses=12,
+        source_retries=13,
+        rate_limit_responses=14,
+        source_transport_errors=15,
+        source_request_duration_ms=16,
+        source_request_wait_duration_ms=17,
+        source_retry_wait_duration_ms=18,
+    )
+    _finish(repository, run_id, metrics=metrics)
     repository.start_scrape_run(
         ScrapeRunInput(
             requested_limit=3,
@@ -376,6 +394,9 @@ def test_facets_and_scrape_status_exclude_persistence_details(
     assert status_payload["listing_count"] == 2
     assert status_payload["latest_run"]["status"] == "running"
     assert status_payload["latest_successful_run"]["status"] == "succeeded"
+    assert {
+        field: status_payload["latest_successful_run"][field] for field in asdict(metrics)
+    } == asdict(metrics)
     assert status_payload["latest_listing_seen_at"].endswith("Z")
     assert "id" not in status_payload["latest_run"]
     assert "error_summary" not in status_payload["latest_run"]

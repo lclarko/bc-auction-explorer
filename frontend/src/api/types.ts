@@ -279,8 +279,24 @@ export type components = {
             observations_created: number;
             /** Pages Visited */
             pages_visited: number;
+            /** Rate Limit Responses */
+            rate_limit_responses: number;
             /** Requested Limit */
             requested_limit: number;
+            /** Source Request Duration Ms */
+            source_request_duration_ms: number;
+            /** Source Request Wait Duration Ms */
+            source_request_wait_duration_ms: number;
+            /** Source Requests */
+            source_requests: number;
+            /** Source Responses */
+            source_responses: number;
+            /** Source Retries */
+            source_retries: number;
+            /** Source Retry Wait Duration Ms */
+            source_retry_wait_duration_ms: number;
+            /** Source Transport Errors */
+            source_transport_errors: number;
             /**
              * Started At
              * Format: date-time

@@ -633,9 +633,49 @@
             "title": "Pages Visited",
             "type": "integer"
           },
+          "rate_limit_responses": {
+            "minimum": 0.0,
+            "title": "Rate Limit Responses",
+            "type": "integer"
+          },
           "requested_limit": {
             "minimum": 0.0,
             "title": "Requested Limit",
+            "type": "integer"
+          },
+          "source_request_duration_ms": {
+            "minimum": 0.0,
+            "title": "Source Request Duration Ms",
+            "type": "integer"
+          },
+          "source_request_wait_duration_ms": {
+            "minimum": 0.0,
+            "title": "Source Request Wait Duration Ms",
+            "type": "integer"
+          },
+          "source_requests": {
+            "minimum": 0.0,
+            "title": "Source Requests",
+            "type": "integer"
+          },
+          "source_responses": {
+            "minimum": 0.0,
+            "title": "Source Responses",
+            "type": "integer"
+          },
+          "source_retries": {
+            "minimum": 0.0,
+            "title": "Source Retries",
+            "type": "integer"
+          },
+          "source_retry_wait_duration_ms": {
+            "minimum": 0.0,
+            "title": "Source Retry Wait Duration Ms",
+            "type": "integer"
+          },
+          "source_transport_errors": {
+            "minimum": 0.0,
+            "title": "Source Transport Errors",
             "type": "integer"
           },
           "started_at": {
@@ -657,7 +697,15 @@
           "items_created",
           "items_updated",
           "observations_created",
-          "item_failures"
+          "item_failures",
+          "source_requests",
+          "source_responses",
+          "source_retries",
+          "rate_limit_responses",
+          "source_transport_errors",
+          "source_request_duration_ms",
+          "source_request_wait_duration_ms",
+          "source_retry_wait_duration_ms"
         ],
         "title": "ScrapeRunSummary",
         "type": "object"
