@@ -40,6 +40,7 @@ def _detail(
     category: str = "Vehicles",
     status: AuctionStatus = AuctionStatus.OPEN,
     bid_count: int | None = 2,
+    image_urls: tuple[str, ...] = (),
 ) -> AuctionDetailRecord:
     return AuctionDetailRecord.model_validate(
         {
@@ -62,6 +63,7 @@ def _detail(
             "closing_at": closing_at,
             "status_raw": "Closed" if status is AuctionStatus.CLOSED else "isbid=Y",
             "status": status,
+            "image_urls": image_urls,
             "content_hash": "0" * 64,
         }
     )
@@ -134,6 +136,7 @@ def test_listings_filter_sort_and_paginate(
             title="Utility trailer",
             current_bid=Decimal("30.00"),
             closing_at=datetime(2026, 7, 16, 10, tzinfo=UTC),
+            image_urls=("https://www.bcauction.ca/images/utility-trailer.jpg",),
         ),
         observed_at=datetime(2026, 7, 16, tzinfo=UTC),
     )
@@ -153,21 +156,19 @@ def test_listings_filter_sort_and_paginate(
     )
     _finish(repository, run_id)
 
-    response = client.get(
-        "/api/listings",
-        params={
-            "keyword": "utility",
-            "location": "victoria",
-            "category": "vehicles",
-            "status": "open",
-            "min_price": "20",
-            "max_price": "30",
-            "closing_after": "2026-07-16T00:00:00Z",
-            "closing_before": "2026-07-17T23:59:59Z",
-            "sort": "price_high",
-            "page_size": 1,
-        },
-    )
+    listing_params = {
+        "keyword": "utility",
+        "location": "victoria",
+        "category": "vehicles",
+        "status": "open",
+        "min_price": "20",
+        "max_price": "30",
+        "closing_after": "2026-07-16T00:00:00Z",
+        "closing_before": "2026-07-17T23:59:59Z",
+        "sort": "price_high",
+        "page_size": 1,
+    }
+    response = client.get("/api/listings", params=listing_params)
 
     assert response.status_code == 200
     payload = response.json()
@@ -179,13 +180,20 @@ def test_listings_filter_sort_and_paginate(
     }
     assert [item["source_id"] for item in payload["items"]] == ["A000002"]
     assert Decimal(payload["items"][0]["current_bid"]) == Decimal("30.00")
+    assert payload["items"][0]["canonical_source_url"] == (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733642"
+    )
+    assert payload["items"][0]["image_urls"] == [
+        "https://www.bcauction.ca/images/utility-trailer.jpg"
+    ]
     assert "request_url" not in payload["items"][0]
     assert "metadata_hash" not in payload["items"][0]
     assert "sessionID" not in payload["items"][0]["canonical_source_url"]
+    assert "sessionID" not in payload["items"][0]["image_urls"][0]
 
     second_page = client.get(
         "/api/listings",
-        params={"keyword": "utility", "sort": "price_high", "page": 2, "page_size": 1},
+        params={**listing_params, "page": 2},
     )
     assert second_page.status_code == 200
     assert [item["source_id"] for item in second_page.json()["items"]] == ["A000001"]
