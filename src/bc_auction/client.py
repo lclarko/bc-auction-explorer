@@ -42,6 +42,20 @@ class FetchedPage:
         return decode_html(self.body, self.content_type)
 
 
+@dataclass(frozen=True, slots=True)
+class SourceRequestMetrics:
+    """Aggregate source access metrics with no URLs or session state."""
+
+    requests_attempted: int
+    responses_received: int
+    retries: int
+    rate_limit_responses: int
+    transport_errors: int
+    request_duration_ms: int
+    request_wait_duration_ms: int
+    retry_wait_duration_ms: int
+
+
 class AuctionClient:
     def __init__(
         self,
@@ -79,6 +93,14 @@ class AuctionClient:
         self._max_retries = max_retries
         self._retry_backoff = retry_backoff
         self._max_html_bytes = max_html_bytes
+        self._requests_attempted = 0
+        self._responses_received = 0
+        self._retries = 0
+        self._rate_limit_responses = 0
+        self._transport_errors = 0
+        self._request_duration_ms = 0
+        self._request_wait_duration_ms = 0
+        self._retry_wait_duration_ms = 0
         self._client = httpx.Client(
             follow_redirects=False,
             timeout=timeout,
@@ -105,6 +127,19 @@ class AuctionClient:
 
     def close(self) -> None:
         self._client.close()
+
+    @property
+    def metrics(self) -> SourceRequestMetrics:
+        return SourceRequestMetrics(
+            requests_attempted=self._requests_attempted,
+            responses_received=self._responses_received,
+            retries=self._retries,
+            rate_limit_responses=self._rate_limit_responses,
+            transport_errors=self._transport_errors,
+            request_duration_ms=self._request_duration_ms,
+            request_wait_duration_ms=self._request_wait_duration_ms,
+            retry_wait_duration_ms=self._retry_wait_duration_ms,
+        )
 
     def get(self, path_or_url: str) -> FetchedPage:
         return self._request("GET", path_or_url)
@@ -206,11 +241,17 @@ class AuctionClient:
             try:
                 response = self._send_request(method, url, data)
             except _RETRYABLE_TRANSPORT_ERRORS:
+                self._transport_errors += 1
                 if retries_used >= self._max_retries:
                     raise
                 self._sleep_for_retry(retries_used)
                 retries_used += 1
+                self._retries += 1
                 continue
+
+            self._responses_received += 1
+            if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
+                self._rate_limit_responses += 1
 
             should_retry = (
                 response.status_code in _RETRYABLE_STATUS_CODES
@@ -223,6 +264,7 @@ class AuctionClient:
             response.close()
             self._sleep_for_retry(retries_used, retry_after=retry_after)
             retries_used += 1
+            self._retries += 1
 
     def _send_request(
         self,
@@ -230,14 +272,19 @@ class AuctionClient:
         url: str,
         data: Sequence[tuple[str, str]] | None,
     ) -> httpx.Response:
-        if data is None:
-            return self._client.request(method, url)
-        return self._client.request(
-            method,
-            url,
-            content=urlencode(data),
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
+        request_started = time.monotonic()
+        self._requests_attempted += 1
+        try:
+            if data is None:
+                return self._client.request(method, url)
+            return self._client.request(
+                method,
+                url,
+                content=urlencode(data),
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+        finally:
+            self._request_duration_ms += _elapsed_milliseconds(request_started)
 
     @staticmethod
     def _redirect_method(method: str, status_code: int) -> str:
@@ -290,6 +337,7 @@ class AuctionClient:
     def _sleep_for_retry(self, retries_used: int, *, retry_after: float | None = None) -> None:
         bounded_backoff = min(5.0, self._retry_backoff * (2**retries_used))
         delay = bounded_backoff if retry_after is None else retry_after
+        self._retry_wait_duration_ms += round(delay * 1000)
         time.sleep(delay)
 
     @staticmethod
@@ -323,5 +371,10 @@ class AuctionClient:
             elapsed = now - self._last_request_started
             remaining = self._min_request_interval - elapsed
             if remaining > 0:
+                self._request_wait_duration_ms += round(remaining * 1000)
                 time.sleep(remaining)
         self._last_request_started = time.monotonic()
+
+
+def _elapsed_milliseconds(started_at: float) -> int:
+    return round((time.monotonic() - started_at) * 1000)

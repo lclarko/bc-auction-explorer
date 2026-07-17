@@ -376,6 +376,8 @@ def test_facets_and_scrape_status_exclude_persistence_details(
     assert status_payload["listing_count"] == 2
     assert status_payload["latest_run"]["status"] == "running"
     assert status_payload["latest_successful_run"]["status"] == "succeeded"
+    assert status_payload["latest_successful_run"]["source_requests"] == 0
+    assert status_payload["latest_successful_run"]["source_request_duration_ms"] == 0
     assert status_payload["latest_listing_seen_at"].endswith("Z")
     assert "id" not in status_payload["latest_run"]
     assert "error_summary" not in status_payload["latest_run"]

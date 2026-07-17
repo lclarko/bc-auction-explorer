@@ -31,6 +31,31 @@ def test_client_keeps_raw_body_and_content_type() -> None:
     assert page.decode().text == "Café"
 
 
+def test_client_records_aggregate_retry_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests == 1:
+            return httpx.Response(429, headers={"retry-after": "1"}, request=request)
+        return httpx.Response(200, content=b"results", request=request)
+
+    monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
+        client.get("/results")
+        metrics = client.metrics
+
+    assert metrics.requests_attempted == 2
+    assert metrics.responses_received == 2
+    assert metrics.retries == 1
+    assert metrics.rate_limit_responses == 1
+    assert metrics.transport_errors == 0
+    assert metrics.request_duration_ms >= 0
+    assert metrics.request_wait_duration_ms == 0
+    assert metrics.retry_wait_duration_ms == 1000
+
+
 def test_client_rejects_another_host() -> None:
     with AuctionClient(min_request_interval=0) as client:
         with pytest.raises(ValueError):

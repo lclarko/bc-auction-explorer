@@ -15,6 +15,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const latest = scrapeStatus.data?.latest_run;
   const latestSuccess = scrapeStatus.data?.latest_successful_run;
   const successfulAt = latestSuccess?.finished_at ?? latestSuccess?.started_at;
+  const latestDuration = runDuration(latest?.started_at, latest?.finished_at);
+  const requestNote = latest
+    ? ` ${latest.source_requests} source ${latest.source_requests === 1 ? "request" : "requests"}, ${latest.source_retries} ${latest.source_retries === 1 ? "retry" : "retries"}.`
+    : "";
   const latestRunNote =
     latest?.status === "partial"
       ? ` ${latest.item_failures} ${latest.item_failures === 1 ? "listing" : "listings"} could not be stored.`
@@ -42,6 +46,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           ) : latest ? (
             <>
               Latest run: <strong>{latest.status}</strong>. Last successful refresh: {pacificDateTime(successfulAt)}.
+              {latestDuration ? ` Completed in ${latestDuration}.` : ""}
+              {requestNote}
               {latestRunNote}
             </>
           ) : (
@@ -57,4 +63,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       </footer>
     </div>
   );
+}
+
+function runDuration(startedAt: string | undefined, finishedAt: string | null | undefined): string | null {
+  if (!startedAt || !finishedAt) {
+    return null;
+  }
+  const durationMilliseconds = Date.parse(finishedAt) - Date.parse(startedAt);
+  if (!Number.isFinite(durationMilliseconds) || durationMilliseconds < 0) {
+    return null;
+  }
+  const totalSeconds = Math.round(durationMilliseconds / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
 }

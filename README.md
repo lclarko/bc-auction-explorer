@@ -24,6 +24,18 @@ BC_AUCTION_DATABASE_URL=postgresql+psycopg://bc_auction:bc_auction@localhost:543
   python -m bc_auction scrape --limit 20 --persist
 ```
 
+`--limit` is always explicit. Start with a small run such as 20 or 100 listings,
+review the resulting scrape status, then increase the limit deliberately for a
+larger ingest. The scraper makes sequential public requests with a minimum request
+interval and respects source retry guidance; it does not attempt to bypass source
+access controls.
+
+Each detail listing currently requires several public source requests, so a run's
+duration is governed by both source response time and the request interval. The
+read-only scrape-status endpoint reports aggregate request, retry, rate-limit, and
+timing metrics for each completed run. It never exposes request URLs, cookies, or
+session identifiers.
+
 Run PostgreSQL integration tests with an isolated database URL:
 
 ```bash

@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         PersistResult,
         ScrapeRunCounts,
         ScrapeRunInput,
+        ScrapeRunMetrics,
     )
 
 _SESSION_ID = re.compile(r"(?i)(sessionID=)[^&\s'\"<>]+")
@@ -239,6 +240,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_id: UUID | None = None
     outcome: _ScrapeOutcome | None = None
     counts: ScrapeRunCounts | None = None
+    metrics: ScrapeRunMetrics | None = None
     run_finished = False
     try:
         if args.persist and args.results_only:
@@ -251,13 +253,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 started_at=datetime.now(UTC),
             )
         with AuctionClient() as client:
-            outcome = _scrape_with_outcome(
-                client,
-                args.limit,
-                keyword=args.keyword,
-                display_order=args.display_order,
-                results_only=args.results_only,
-            )
+            try:
+                outcome = _scrape_with_outcome(
+                    client,
+                    args.limit,
+                    keyword=args.keyword,
+                    display_order=args.display_order,
+                    results_only=args.results_only,
+                )
+            finally:
+                metrics = _scrape_run_metrics(client) if args.persist else None
         records = outcome.records
         failures = outcome.failures
         if repository is not None and run_id is not None:
@@ -280,6 +285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 run_id,
                 status=ScrapeRunStatus.PARTIAL if failures else ScrapeRunStatus.SUCCEEDED,
                 counts=counts,
+                metrics=metrics,
             )
             run_finished = True
         output = {
@@ -298,11 +304,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             output["persistence"] = {"scrape_run_id": str(run_id)}
         _write_output(args.output, output)
     except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
-        _report_failed_run_finalization(repository, run_id, outcome, counts, run_finished)
+        _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
-        _report_failed_run_finalization(repository, run_id, outcome, counts, run_finished)
+        _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     finally:
@@ -402,16 +408,33 @@ def _scrape_run_counts(
     )
 
 
+def _scrape_run_metrics(client: AuctionClient) -> ScrapeRunMetrics:
+    from bc_auction.persistence import ScrapeRunMetrics
+
+    metrics = client.metrics
+    return ScrapeRunMetrics(
+        source_requests=metrics.requests_attempted,
+        source_responses=metrics.responses_received,
+        source_retries=metrics.retries,
+        rate_limit_responses=metrics.rate_limit_responses,
+        source_transport_errors=metrics.transport_errors,
+        source_request_duration_ms=metrics.request_duration_ms,
+        source_request_wait_duration_ms=metrics.request_wait_duration_ms,
+        source_retry_wait_duration_ms=metrics.retry_wait_duration_ms,
+    )
+
+
 def _report_failed_run_finalization(
     repository: AuctionRepository | None,
     run_id: UUID | None,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
+    metrics: ScrapeRunMetrics | None,
     run_finished: bool,
 ) -> None:
     if repository is None or run_id is None or run_finished:
         return
-    finalization_error = _finish_failed_run(repository, run_id, outcome, counts)
+    finalization_error = _finish_failed_run(repository, run_id, outcome, counts, metrics)
     if finalization_error is not None:
         print(f"scrape run finalization failed: {finalization_error}", file=sys.stderr)
 
@@ -421,6 +444,7 @@ def _finish_failed_run(
     run_id: UUID,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
+    metrics: ScrapeRunMetrics | None,
 ) -> str | None:
     from bc_auction.persistence import ScrapeRunCounts, ScrapeRunStatus
 
@@ -437,6 +461,7 @@ def _finish_failed_run(
                 observations_created=0,
                 item_failures=len(outcome.failures) if outcome is not None else 0,
             ),
+            metrics=metrics,
             error_summary="scrape failed",
         )
     except Exception as exc:

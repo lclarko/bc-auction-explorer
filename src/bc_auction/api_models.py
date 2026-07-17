@@ -131,6 +131,14 @@ class ScrapeRunSummary(_TimestampedModel):
     items_updated: int = Field(ge=0)
     observations_created: int = Field(ge=0)
     item_failures: int = Field(ge=0)
+    source_requests: int = Field(ge=0)
+    source_responses: int = Field(ge=0)
+    source_retries: int = Field(ge=0)
+    rate_limit_responses: int = Field(ge=0)
+    source_transport_errors: int = Field(ge=0)
+    source_request_duration_ms: int = Field(ge=0)
+    source_request_wait_duration_ms: int = Field(ge=0)
+    source_retry_wait_duration_ms: int = Field(ge=0)
 
 
 class ScrapeStatus(_TimestampedModel):

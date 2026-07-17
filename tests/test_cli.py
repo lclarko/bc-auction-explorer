@@ -8,7 +8,7 @@ from uuid import UUID
 import pytest
 
 import bc_auction.__main__ as cli
-from bc_auction.client import FetchedPage
+from bc_auction.client import FetchedPage, SourceRequestMetrics
 from bc_auction.errors import ParserContractError
 from bc_auction.persistence import (
     IdentityConflictError,
@@ -38,6 +38,10 @@ class _SuccessfulClient:
 
     def __exit__(self, *args: object) -> None:
         return None
+
+    @property
+    def metrics(self) -> SourceRequestMetrics:
+        return SourceRequestMetrics(0, 0, 0, 0, 0, 0, 0, 0)
 
     def search_open_auctions(
         self,

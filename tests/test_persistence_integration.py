@@ -20,6 +20,7 @@ from bc_auction.persistence import (
     IdentityConflictError,
     ScrapeRunCounts,
     ScrapeRunInput,
+    ScrapeRunMetrics,
     ScrapeRunStatus,
     convert_reconciled_record,
 )
@@ -466,15 +467,34 @@ def test_scrape_run_lifecycle_is_enforced(repository: AuctionRepository) -> None
     )
     with pytest.raises(ValueError, match="cannot be finalized"):
         repository.finish_scrape_run(run_id, status=ScrapeRunStatus.RUNNING, counts=counts)
-    repository.finish_scrape_run(run_id, status=ScrapeRunStatus.PARTIAL, counts=counts)
+    metrics = ScrapeRunMetrics(
+        source_requests=12,
+        source_responses=11,
+        source_retries=2,
+        rate_limit_responses=1,
+        source_transport_errors=1,
+        source_request_duration_ms=3210,
+        source_request_wait_duration_ms=4500,
+        source_retry_wait_duration_ms=1000,
+    )
+    repository.finish_scrape_run(
+        run_id,
+        status=ScrapeRunStatus.PARTIAL,
+        counts=counts,
+        metrics=metrics,
+    )
 
     with repository._engine.connect() as connection:
         row = connection.execute(
-            select(scrape_runs.c.status, scrape_runs.c.item_failures).where(
-                scrape_runs.c.id == run_id
-            )
+            select(
+                scrape_runs.c.status,
+                scrape_runs.c.item_failures,
+                scrape_runs.c.source_requests,
+                scrape_runs.c.source_retries,
+                scrape_runs.c.source_request_wait_duration_ms,
+            ).where(scrape_runs.c.id == run_id)
         ).one()
-    assert row == (ScrapeRunStatus.PARTIAL.value, 1)
+    assert row == (ScrapeRunStatus.PARTIAL.value, 1, 12, 2, 4500)
 
     failed_run_id = _run(repository)
     repository.finish_scrape_run(
