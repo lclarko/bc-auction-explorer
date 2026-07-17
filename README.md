@@ -3,8 +3,9 @@
 Unofficial, read-only index of public BC Auction listings. It is not affiliated with
 or endorsed by the Government of British Columbia.
 
-The current milestone adds a read-only API over persisted listings and scrape status.
-Frontend and scheduling work come later.
+The project includes a read-only API and a responsive web interface over persisted
+listings and scrape status. It does not schedule scrapes, accept user accounts, or
+modify the auction source.
 
 ## Local persistence
 
@@ -58,10 +59,60 @@ HTML, persistence IDs, hashes, and scrape error details.
 For deployment, give the API database role `SELECT`-only access. The application has no
 write routes and its query layer issues only read statements.
 
+## Local frontend
+
+Use Python 3.12 or newer for the API and schema-generation commands:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+```
+
+In a second terminal, start the API after applying migrations:
+
+```bash
+BC_AUCTION_DATABASE_URL=postgresql+psycopg://bc_auction:bc_auction@localhost:5432/bc_auction \
+  uvicorn bc_auction.api:app --reload
+```
+
+Then install and run the frontend:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+Vite serves the frontend at `http://127.0.0.1:5173` and proxies `/api` requests to the
+local API. Regenerate the checked-in API contract and TypeScript client after an API
+contract change:
+
+```bash
+cd frontend
+npm run generate:api-types
+```
+
+For production, serve `frontend/dist` as static files, proxy `/api` to the FastAPI
+application, and route all remaining paths to the frontend entry point so direct links
+to listing details continue to work.
+
 Run the standard checks before merge:
 
 ```bash
 pytest
 ruff check .
 mypy src
+```
+
+Frontend checks:
+
+```bash
+cd frontend
+npm run check:api-types
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
 ```
