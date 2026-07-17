@@ -57,6 +57,29 @@ scrape_runs = Table(
         "(status IN ('succeeded', 'partial', 'failed') AND finished_at IS NOT NULL)",
         name="ck_scrape_runs_status_finished_at",
     ),
+    CheckConstraint("source_requests >= 0", name="ck_scrape_runs_source_requests_nonnegative"),
+    CheckConstraint("source_responses >= 0", name="ck_scrape_runs_source_responses_nonnegative"),
+    CheckConstraint("source_retries >= 0", name="ck_scrape_runs_source_retries_nonnegative"),
+    CheckConstraint(
+        "rate_limit_responses >= 0",
+        name="ck_scrape_runs_rate_limit_responses_nonnegative",
+    ),
+    CheckConstraint(
+        "source_transport_errors >= 0",
+        name="ck_scrape_runs_source_transport_errors_nonnegative",
+    ),
+    CheckConstraint(
+        "source_request_duration_ms >= 0",
+        name="ck_scrape_runs_source_request_duration_ms_nonnegative",
+    ),
+    CheckConstraint(
+        "source_request_wait_duration_ms >= 0",
+        name="ck_scrape_runs_source_request_wait_duration_ms_nonnegative",
+    ),
+    CheckConstraint(
+        "source_retry_wait_duration_ms >= 0",
+        name="ck_scrape_runs_source_retry_wait_duration_ms_nonnegative",
+    ),
 )
 
 auction_items = Table(

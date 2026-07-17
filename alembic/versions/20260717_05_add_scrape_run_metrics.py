@@ -28,14 +28,24 @@ _METRIC_COLUMNS = (
 )
 
 
+def _constraint_name(column_name: str) -> str:
+    return f"ck_scrape_runs_{column_name}_nonnegative"
+
+
 def upgrade() -> None:
     for column_name in _METRIC_COLUMNS:
         op.add_column(
             "scrape_runs",
             sa.Column(column_name, sa.Integer(), nullable=False, server_default="0"),
         )
+        op.create_check_constraint(
+            _constraint_name(column_name),
+            "scrape_runs",
+            f"{column_name} >= 0",
+        )
 
 
 def downgrade() -> None:
     for column_name in reversed(_METRIC_COLUMNS):
+        op.drop_constraint(_constraint_name(column_name), "scrape_runs", type_="check")
         op.drop_column("scrape_runs", column_name)

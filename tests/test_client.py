@@ -41,7 +41,9 @@ def test_client_records_aggregate_retry_metrics(monkeypatch: pytest.MonkeyPatch)
             return httpx.Response(429, headers={"retry-after": "1"}, request=request)
         return httpx.Response(200, content=b"results", request=request)
 
+    durations = iter((17, 23))
     monkeypatch.setattr(client_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(client_module, "_elapsed_milliseconds", lambda _: next(durations))
     with AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)) as client:
         client.get("/results")
         metrics = client.metrics
@@ -51,7 +53,7 @@ def test_client_records_aggregate_retry_metrics(monkeypatch: pytest.MonkeyPatch)
     assert metrics.retries == 1
     assert metrics.rate_limit_responses == 1
     assert metrics.transport_errors == 0
-    assert metrics.request_duration_ms >= 0
+    assert metrics.request_duration_ms == 40
     assert metrics.request_wait_duration_ms == 0
     assert metrics.retry_wait_duration_ms == 1000
 

@@ -490,11 +490,16 @@ def test_scrape_run_lifecycle_is_enforced(repository: AuctionRepository) -> None
                 scrape_runs.c.status,
                 scrape_runs.c.item_failures,
                 scrape_runs.c.source_requests,
+                scrape_runs.c.source_responses,
                 scrape_runs.c.source_retries,
+                scrape_runs.c.rate_limit_responses,
+                scrape_runs.c.source_transport_errors,
+                scrape_runs.c.source_request_duration_ms,
                 scrape_runs.c.source_request_wait_duration_ms,
+                scrape_runs.c.source_retry_wait_duration_ms,
             ).where(scrape_runs.c.id == run_id)
         ).one()
-    assert row == (ScrapeRunStatus.PARTIAL.value, 1, 12, 2, 4500)
+    assert row == (ScrapeRunStatus.PARTIAL.value, 1, 12, 11, 2, 1, 1, 3210, 4500, 1000)
 
     failed_run_id = _run(repository)
     repository.finish_scrape_run(
@@ -526,4 +531,32 @@ def test_scrape_run_lifecycle_is_enforced(repository: AuctionRepository) -> None
                 update(scrape_runs)
                 .where(scrape_runs.c.id == constraint_run_id)
                 .values(finished_at=datetime(2026, 7, 15, 1, tzinfo=UTC))
+            )
+
+
+@pytest.mark.parametrize(
+    "column_name",
+    (
+        "source_requests",
+        "source_responses",
+        "source_retries",
+        "rate_limit_responses",
+        "source_transport_errors",
+        "source_request_duration_ms",
+        "source_request_wait_duration_ms",
+        "source_retry_wait_duration_ms",
+    ),
+)
+def test_scrape_run_metrics_reject_negative_values(
+    repository: AuctionRepository,
+    column_name: str,
+) -> None:
+    run_id = _run(repository)
+
+    with pytest.raises(IntegrityError):
+        with repository._engine.begin() as connection:
+            connection.execute(
+                update(scrape_runs)
+                .where(scrape_runs.c.id == run_id)
+                .values({column_name: -1})
             )

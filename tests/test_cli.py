@@ -14,12 +14,15 @@ from bc_auction.persistence import (
     IdentityConflictError,
     PersistenceError,
     PersistResult,
+    ScrapeRunMetrics,
     ScrapeRunStatus,
 )
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _RESULTS_URL = "https://www.bcauction.ca/open.dll/submitDocSearch"
 _DETAIL_URL = "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=SESSION_ID&disID=8733643"
+_SOURCE_METRICS = SourceRequestMetrics(11, 12, 13, 14, 15, 16, 17, 18)
+_PERSISTED_METRICS = ScrapeRunMetrics(11, 12, 13, 14, 15, 16, 17, 18)
 
 
 def _page(name: str, url: str, content_type: str | None = None) -> FetchedPage:
@@ -41,7 +44,7 @@ class _SuccessfulClient:
 
     @property
     def metrics(self) -> SourceRequestMetrics:
-        return SourceRequestMetrics(0, 0, 0, 0, 0, 0, 0, 0)
+        return _SOURCE_METRICS
 
     def search_open_auctions(
         self,
@@ -169,6 +172,7 @@ class _FakePersistenceRepository:
         self.identity_conflict_at = identity_conflict_at
         self.finish_error = finish_error
         self.finished: list[tuple[ScrapeRunStatus, object]] = []
+        self.finished_metrics: list[object] = []
         self.started = False
         self.persist_calls = 0
 
@@ -190,6 +194,7 @@ class _FakePersistenceRepository:
     def finish_scrape_run(self, run_id: UUID, **kwargs: object) -> None:
         assert run_id == self.run_id
         self.finished.append((kwargs["status"], kwargs["counts"]))
+        self.finished_metrics.append(kwargs["metrics"])
         if self.finish_error:
             raise RuntimeError("database unavailable")
 
@@ -220,6 +225,7 @@ def test_persist_creates_and_finishes_a_successful_scrape_run(monkeypatch, capsy
     assert repository.started is True
     assert repository.finished[0][0] is ScrapeRunStatus.SUCCEEDED
     assert repository.finished[0][1].observations_created == 1
+    assert repository.finished_metrics == [_PERSISTED_METRICS]
 
 
 def test_persist_marks_storage_failure_as_a_partial_run(monkeypatch, capsys) -> None:
@@ -285,6 +291,7 @@ def test_failed_run_finalization_does_not_mask_the_scrape_error(monkeypatch, cap
     assert repository.finished[0][0] is ScrapeRunStatus.FAILED
     assert repository.finished[0][1].items_created == 0
     assert repository.finished[0][1].observations_created == 0
+    assert repository.finished_metrics == [_PERSISTED_METRICS]
     assert engine.disposed is True
 
 
