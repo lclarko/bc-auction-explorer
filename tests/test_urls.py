@@ -1,6 +1,6 @@
 import pytest
 
-from bc_auction.urls import canonicalize_source_url, normalize_public_url
+from bc_auction.urls import canonicalize_source_url, extract_source_dis_id, normalize_public_url
 
 
 def test_normalize_public_url_removes_session_ids_and_sorts_query_pairs() -> None:
@@ -68,3 +68,55 @@ def test_canonicalize_source_url_rejects_an_embedded_session_id() -> None:
 def test_canonicalize_source_url_rejects_invalid_identity_urls(url: str, error: str) -> None:
     with pytest.raises(ValueError, match=error):
         canonicalize_source_url(url)
+
+
+def test_extract_source_dis_id_uses_the_canonical_display_id() -> None:
+    assert (
+        extract_source_dis_id(
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643"
+        )
+        == "8733643"
+    )
+
+
+def test_extract_source_dis_id_normalizes_navigation_parameters_and_session_values() -> None:
+    first = extract_source_dis_id(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?docType=Tender&"
+        "disID=8733643&doc_search_by=Tend&sessionID=private"
+    )
+    second = extract_source_dis_id(
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?session%49D=private&"
+        "doc_search_by=Tend&disID=8733643&dis_version_nos=2"
+    )
+
+    assert first == second == "8733643"
+
+
+@pytest.mark.parametrize(
+    ("url", "error"),
+    [
+        (
+            "https://example.com/open.dll/showDisplayDocument?disID=8733643",
+            "BC Auction HTTPS host",
+        ),
+        (
+            "https://www.bcauction.ca/open.dll/showDocSummary?disID=8733643",
+            "showDisplayDocument",
+        ),
+        (
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=1&disID=2",
+            "display ID",
+        ),
+        (
+            "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643&"
+            "redirect=showDocSummary%3FsessionID%3Dprivate",
+            "embedded session ID",
+        ),
+    ],
+)
+def test_extract_source_dis_id_rejects_unstable_or_session_bearing_urls(
+    url: str,
+    error: str,
+) -> None:
+    with pytest.raises(ValueError, match=error):
+        extract_source_dis_id(url)
