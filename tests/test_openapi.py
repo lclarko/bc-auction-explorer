@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from bc_auction.openapi import export_openapi_schema
 
@@ -8,6 +9,11 @@ def test_export_openapi_schema_writes_the_public_contract(tmp_path) -> None:
 
     export_openapi_schema(output)
 
-    schema = json.loads(output.read_text(encoding="utf-8"))
-    assert "/api/listings" in schema["paths"]
-    assert "/api/listings/{source_id}" in schema["paths"]
+    exported = json.loads(output.read_text(encoding="utf-8"))
+    checked_in = json.loads(
+        (Path(__file__).parents[1] / "frontend" / "src" / "api" / "schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert exported == checked_in

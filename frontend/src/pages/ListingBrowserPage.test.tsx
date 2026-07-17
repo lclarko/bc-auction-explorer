@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,17 +33,27 @@ const listing = {
   title: "Surplus office chair",
 };
 
+let listingRequestUrls: URL[] = [];
+
 beforeEach(() => {
+  listingRequestUrls = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       if (url.pathname === "/api/listings") {
+        listingRequestUrls.push(url);
+        const page = Number(url.searchParams.get("page") ?? "1");
         return Promise.resolve(
           new Response(
             JSON.stringify({
               items: [listing],
-              page_info: { page: 1, page_size: 25, total_items: 1, total_pages: 1 },
+              page_info: {
+                page,
+                page_size: 25,
+                total_items: page === 2 ? 0 : 1,
+                total_pages: page === 2 ? 0 : 1,
+              },
             }),
             { headers: { "Content-Type": "application/json" } },
           ),
@@ -92,6 +102,17 @@ describe("ListingBrowserPage", () => {
     await user.type(input, "chair");
     await user.click(screen.getByRole("button", { name: "Apply filters" }));
 
+    await waitFor(() => {
+      expect(listingRequestUrls.at(-1)?.searchParams.get("keyword")).toBe("chair");
+    });
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
+  });
+
+  it("returns an out-of-range empty page to the first page", async () => {
+    renderPage("/?page=2");
+
+    await waitFor(() => {
+      expect(listingRequestUrls.at(-1)?.searchParams.get("page")).toBe("1");
+    });
   });
 });

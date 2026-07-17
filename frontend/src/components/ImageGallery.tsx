@@ -8,17 +8,18 @@ type ImageGalleryProps = {
 };
 
 export function ImageGallery({ imageUrls, title }: ImageGalleryProps) {
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const [failedUrls, setFailedUrls] = useState<ReadonlySet<string>>(() => new Set());
-  const selectedUrl = imageUrls[selectedIndex];
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+  const [failedImageUrl, setFailedImageUrl] = useState<string | null>(null);
+  const selectedUrl =
+    selectedImageUrl && imageUrls.includes(selectedImageUrl) ? selectedImageUrl : (imageUrls[0] ?? null);
 
   return (
     <div className="image-gallery">
-      {selectedUrl && !failedUrls.has(selectedUrl) ? (
+      {selectedUrl && failedImageUrl !== selectedUrl ? (
         <img
           alt={title}
           className="listing-image image-gallery__main"
-          onError={() => setFailedUrls((urls) => new Set(urls).add(selectedUrl))}
+          onError={() => setFailedImageUrl(selectedUrl)}
           referrerPolicy="no-referrer"
           src={selectedUrl}
         />
@@ -30,10 +31,10 @@ export function ImageGallery({ imageUrls, title }: ImageGalleryProps) {
           {imageUrls.map((imageUrl, index) => (
             <button
               aria-label={`Show image ${index + 1} of ${imageUrls.length}`}
-              aria-pressed={index === selectedIndex}
+              aria-pressed={imageUrl === selectedUrl}
               className="image-gallery__thumbnail"
               key={imageUrl}
-              onClick={() => setSelectedIndex(index)}
+              onClick={() => setSelectedImageUrl(imageUrl)}
               type="button"
             >
               <img alt="" loading="lazy" referrerPolicy="no-referrer" src={imageUrl} />

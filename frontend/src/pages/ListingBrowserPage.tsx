@@ -82,11 +82,14 @@ export function ListingBrowserPage() {
   }, [search, searchParameters, setSearchParameters]);
 
   useEffect(() => {
-    const totalPages = listings.data?.page_info.total_pages;
-    if (totalPages && search.page > totalPages) {
-      setSearchParameters(listingSearchParams({ ...search, page: totalPages }), { replace: true });
+    if (listings.isPlaceholderData || !listings.data) {
+      return;
     }
-  }, [listings.data?.page_info.total_pages, search, setSearchParameters]);
+    const lastPage = Math.max(1, listings.data.page_info.total_pages);
+    if (search.page > lastPage) {
+      setSearchParameters(listingSearchParams({ ...search, page: lastPage }), { replace: true });
+    }
+  }, [listings.data, listings.isPlaceholderData, search, setSearchParameters]);
 
   const applyFilters = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();

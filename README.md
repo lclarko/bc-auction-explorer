@@ -114,5 +114,6 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
+npx playwright install chromium
 npm run test:e2e
 ```

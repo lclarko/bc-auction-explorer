@@ -17,13 +17,15 @@ const listing = {
   title: "Surplus office chair",
 };
 
-async function mockApi(page: Page): Promise<void> {
+async function mockApi(page: Page): Promise<URL[]> {
+  const listingRequestUrls: URL[] = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const respond = (body: object, status = 200): Promise<void> =>
       route.fulfill({ body: JSON.stringify(body), contentType: "application/json", status });
 
     if (url.pathname === "/api/listings") {
+      listingRequestUrls.push(url);
       await respond({
         items: [listing],
         page_info: { page: 1, page_size: 25, total_items: 1, total_pages: 1 },
@@ -66,10 +68,11 @@ async function mockApi(page: Page): Promise<void> {
     }
     await respond({ error: { code: "not_found", message: "Not found" } }, 404);
   });
+  return listingRequestUrls;
 }
 
 test("browses, filters, opens a detail page, and returns to results", async ({ page }) => {
-  await mockApi(page);
+  const listingRequestUrls = await mockApi(page);
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "Surplus office chair" })).toBeVisible();
@@ -78,15 +81,16 @@ test("browses, filters, opens a detail page, and returns to results", async ({ p
   await page.getByRole("searchbox", { name: "Keyword" }).fill("chair");
   await page.getByRole("button", { name: "Apply filters" }).click();
   await expect(page).toHaveURL(/keyword=chair/);
+  await expect.poll(() => listingRequestUrls.at(-1)?.searchParams.get("keyword")).toBe("chair");
 
   await page.getByRole("link", { name: "View details" }).click();
   await expect(page.getByRole("heading", { name: "Surplus office chair" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pickup details" })).toBeVisible();
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 
   await page.getByRole("link", { name: "Back to listings" }).click();
   await expect(page).toHaveURL(/keyword=chair/);
   await expect(page.getByRole("heading", { name: "Surplus office chair" })).toBeVisible();
 
-  const accessibility = await new AxeBuilder({ page }).analyze();
-  expect(accessibility.violations).toEqual([]);
+  expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
 });

@@ -6,10 +6,10 @@ type ListingImageProps = {
 };
 
 export function ListingImage({ alt, imageUrls }: ListingImageProps) {
-  const [failed, setFailed] = useState(false);
   const source = imageUrls[0];
+  const [failedSource, setFailedSource] = useState<string | null>(null);
 
-  if (!source || failed) {
+  if (!source || failedSource === source) {
     return <div aria-label="Image not available" className="listing-image listing-image--fallback" role="img" />;
   }
 
@@ -18,7 +18,7 @@ export function ListingImage({ alt, imageUrls }: ListingImageProps) {
       alt={alt}
       className="listing-image"
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => setFailedSource(source)}
       referrerPolicy="no-referrer"
       src={source}
     />

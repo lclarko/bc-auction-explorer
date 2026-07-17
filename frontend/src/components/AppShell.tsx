@@ -37,6 +37,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="page-width freshness" role="status">
           {scrapeStatus.isError ? (
             "Refresh status is temporarily unavailable."
+          ) : scrapeStatus.isLoading ? (
+            "Loading refresh status."
           ) : latest ? (
             <>
               Latest run: <strong>{latest.status}</strong>. Last successful refresh: {pacificDateTime(successfulAt)}.
