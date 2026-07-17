@@ -34,20 +34,27 @@ const listing = {
 };
 
 let listingRequestUrls: URL[] = [];
+let pendingKeywordResponse: ((response: Response) => void) | undefined;
 
 beforeEach(() => {
   listingRequestUrls = [];
+  pendingKeywordResponse = undefined;
   vi.stubGlobal(
     "fetch",
     vi.fn((input: RequestInfo | URL) => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       if (url.pathname === "/api/listings") {
         listingRequestUrls.push(url);
+        if (url.searchParams.get("keyword") === "updating") {
+          return new Promise<Response>((resolve) => {
+            pendingKeywordResponse = resolve;
+          });
+        }
         const page = Number(url.searchParams.get("page") ?? "1");
         return Promise.resolve(
           new Response(
             JSON.stringify({
-              items: [listing],
+              items: page === 2 ? [] : [listing],
               page_info: {
                 page,
                 page_size: 25,
@@ -112,7 +119,35 @@ describe("ListingBrowserPage", () => {
     renderPage("/?page=2");
 
     await waitFor(() => {
-      expect(listingRequestUrls.at(-1)?.searchParams.get("page")).toBe("1");
+      expect(listingRequestUrls.length).toBeGreaterThanOrEqual(2);
     });
+    expect(listingRequestUrls[0]?.searchParams.get("page")).toBe("2");
+    expect(listingRequestUrls.at(-1)?.searchParams.get("page")).toBe("1");
+  });
+
+  it("announces an update instead of a stale result count", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    const input = await screen.findByRole("searchbox", { name: "Keyword" });
+    await user.type(input, "updating");
+    await user.click(screen.getByRole("button", { name: "Apply filters" }));
+
+    expect(await screen.findByText("Updating listings")).toBeInTheDocument();
+    expect(screen.queryByText("1 listing")).not.toBeInTheDocument();
+
+    if (!pendingKeywordResponse) {
+      throw new Error("Expected the filtered listings request to be pending.");
+    }
+    pendingKeywordResponse(
+      new Response(
+        JSON.stringify({
+          items: [listing],
+          page_info: { page: 1, page_size: 25, total_items: 1, total_pages: 1 },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    expect(await screen.findByText("1 listing")).toBeInTheDocument();
   });
 });

@@ -43,10 +43,16 @@ export function ListingDetailPage() {
   }
 
   if (listing.isError) {
+    const notFound = isListingNotFound(listing.error);
     return (
       <section className="error-panel" role="alert">
-        <h1>{isListingNotFound(listing.error) ? "Listing not found" : "Listing is unavailable"}</h1>
+        <h1>{notFound ? "Listing not found" : "Listing is unavailable"}</h1>
         <p>{detailErrorMessage(listing.error)}</p>
+        {!notFound ? (
+          <button onClick={() => void listing.refetch()} type="button">
+            Try again
+          </button>
+        ) : null}
         <Link to={backTo}>Back to listings</Link>
       </section>
     );

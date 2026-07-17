@@ -119,6 +119,7 @@ export function ListingBrowserPage() {
 
   const pageInfo = listings.data?.page_info;
   const resultCount = pageInfo?.total_items ?? 0;
+  const isUpdating = listings.isPlaceholderData;
 
   return (
     <section className="listing-browser" aria-labelledby="browse-title">
@@ -251,6 +252,8 @@ export function ListingBrowserPage() {
             <p aria-live="polite" className="result-count" role="status">
               {listings.isLoading
                 ? "Loading listings"
+                : isUpdating
+                  ? "Updating listings"
                 : `${resultCount} ${resultCount === 1 ? "listing" : "listings"}`}
             </p>
             <label className="sort-control">
@@ -284,7 +287,7 @@ export function ListingBrowserPage() {
 
           {listings.isLoading ? <p className="loading-state">Loading listings…</p> : null}
 
-          {!listings.isLoading && listings.data?.items.length === 0 ? (
+          {!listings.isLoading && !isUpdating && listings.data?.items.length === 0 ? (
             <div className="empty-state">
               <h2>No listings match these filters</h2>
               <p>Try clearing a filter or broadening your keyword search.</p>

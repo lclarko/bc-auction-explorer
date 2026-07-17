@@ -3,7 +3,7 @@
 import { http, HttpResponse } from "msw";
 import { describe, expect, it } from "vitest";
 
-import { getListings } from "./client";
+import { ApiRequestError, getListings } from "./client";
 import { server } from "../test/server";
 
 describe("typed API client", () => {
@@ -55,9 +55,15 @@ describe("typed API client", () => {
       ),
     );
 
-    await expect(
-      getListings({ page: 1, page_size: 25, sort: "closing_soon", status: "open" }),
-    ).rejects.toMatchObject({
+    const error = await getListings({
+      page: 1,
+      page_size: 25,
+      sort: "closing_soon",
+      status: "open",
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiRequestError);
+    expect(error).toMatchObject({
       code: "invalid_query",
       message: "The price range is invalid.",
       status: 422,

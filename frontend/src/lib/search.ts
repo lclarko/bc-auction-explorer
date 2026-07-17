@@ -28,9 +28,14 @@ export type ListingSearch = typeof defaultListingSearch;
 
 const decimalPattern = /^\d+(?:\.\d{1,2})?$/;
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+const maximumFilterLength = 200;
 
 function stringValue(parameters: URLSearchParams, key: string): string {
   return parameters.get(key)?.trim() ?? "";
+}
+
+function validFilter(value: string): string {
+  return value.length <= maximumFilterLength ? value : "";
 }
 
 function validStatus(value: string): AuctionStatus {
@@ -65,11 +70,11 @@ function validDate(value: string): string {
 
 export function parseListingSearch(parameters: URLSearchParams): ListingSearch {
   return {
-    category: stringValue(parameters, "category"),
+    category: validFilter(stringValue(parameters, "category")),
     closingAfter: validDate(stringValue(parameters, "closing_after")),
     closingBefore: validDate(stringValue(parameters, "closing_before")),
-    keyword: stringValue(parameters, "keyword"),
-    location: stringValue(parameters, "location"),
+    keyword: validFilter(stringValue(parameters, "keyword")),
+    location: validFilter(stringValue(parameters, "location")),
     maxPrice: validDecimal(stringValue(parameters, "max_price")),
     minPrice: validDecimal(stringValue(parameters, "min_price")),
     page: validPage(stringValue(parameters, "page")),

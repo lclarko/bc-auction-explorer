@@ -39,6 +39,22 @@ describe("listing search state", () => {
       status: "open",
     });
   });
+
+  it("keeps free-text filters within the API limit", () => {
+    const atLimit = "a".repeat(200);
+    const beyondLimit = "b".repeat(201);
+    const search = parseListingSearch(
+      new URLSearchParams({
+        category: beyondLimit,
+        keyword: atLimit,
+        location: beyondLimit,
+      }),
+    );
+
+    expect(search.keyword).toBe(atLimit);
+    expect(search.location).toBe("");
+    expect(search.category).toBe("");
+  });
 });
 
 describe("display formatting", () => {
