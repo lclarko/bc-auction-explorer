@@ -45,11 +45,26 @@ def test_canonicalize_source_url_rejects_an_embedded_session_id() -> None:
 
 
 @pytest.mark.parametrize(
+    "url",
+    [
+        "https://user@www.bcauction.ca/Pictures/8733643.jpg",
+        "https://user:secret@www.bcauction.ca/Pictures/8733643.jpg",
+    ],
+)
+def test_normalize_public_url_rejects_embedded_credentials(url: str) -> None:
+    with pytest.raises(ValueError, match="embedded credentials"):
+        normalize_public_url(url)
+
+
+@pytest.mark.parametrize(
     ("url", "error"),
     [
         ("http://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
         ("https://example.com/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
-        ("https://user@www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
+        (
+            "https://user@www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643",
+            "embedded credentials",
+        ),
         ("https://www.bcauction.ca:8443/open.dll/showDisplayDocument?disID=8733643", "HTTPS host"),
         (
             "https://www.bcauction.ca/unrelated/showDisplayDocument?disID=8733643",
