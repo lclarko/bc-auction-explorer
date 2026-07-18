@@ -384,11 +384,11 @@ class AuctionRepository:
             )
 
         item_id = existing["id"]
-        if (
+        # BC Auction can revise a public display document while retaining its auction number.
+        identity_changed = (
             existing["source_dis_id"] != record.source_dis_id
             or existing["canonical_source_url"] != record.canonical_source_url
-        ):
-            raise IdentityConflictError("source ID changed canonical auction identity")
+        )
         if record.observed_at < existing["last_seen_at"]:
             observation_created = self._insert_stale_observation_if_new(
                 connection,
@@ -411,11 +411,17 @@ class AuctionRepository:
             connection.execute(
                 update(auction_items)
                 .where(auction_items.c.id == item_id)
-                .values(last_seen_at=now, updated_at=now)
+                .values(
+                    source_dis_id=record.source_dis_id,
+                    canonical_source_url=record.canonical_source_url,
+                    last_seen_at=now,
+                    last_changed_at=now if identity_changed else existing["last_changed_at"],
+                    updated_at=now,
+                )
             )
             return PersistResult(
                 created=False,
-                updated=False,
+                updated=identity_changed,
                 observation_created=observation_created,
             )
         metadata_changed = existing["metadata_hash"] != record.metadata_hash
@@ -431,7 +437,12 @@ class AuctionRepository:
                 last_seen_at=now,
                 last_changed_at=(
                     now
-                    if metadata_changed or observation_changed or closed_at_changed
+                    if (
+                        identity_changed
+                        or metadata_changed
+                        or observation_changed
+                        or closed_at_changed
+                    )
                     else existing["last_changed_at"]
                 ),
                 closed_at=closed_at,
@@ -446,7 +457,9 @@ class AuctionRepository:
         self._record_location_alias(connection, record)
         return PersistResult(
             created=False,
-            updated=metadata_changed or observation_changed or closed_at_changed,
+            updated=(
+                identity_changed or metadata_changed or observation_changed or closed_at_changed
+            ),
             observation_created=observation_created,
         )
 
