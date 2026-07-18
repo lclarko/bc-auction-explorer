@@ -177,16 +177,19 @@ export function ListingBrowserPage() {
         return false;
       }
       const previous = lastVisibleLifecycleCheck.current;
+      if (!listings.data || listings.isPlaceholderData) {
+        return false;
+      }
       lastVisibleLifecycleCheck.current = checkedAt;
       return (
         search.view === "active" &&
         checkedAt > previous &&
-        (listings.data?.items.some((listing) =>
+        listings.data.items.some((listing) =>
           hasCrossedClosingBoundary(listing, previous, checkedAt),
-        ) ?? false)
+        )
       );
     },
-    [listings.data?.items, search.view],
+    [listings.data?.items, listings.isPlaceholderData, search.view],
   );
 
   useEffect(() => {

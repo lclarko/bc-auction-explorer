@@ -49,6 +49,8 @@ let listingRequestUrls: URL[] = [];
 let locationRequestUrls: URL[] = [];
 let categoryRequestUrls: URL[] = [];
 let pendingKeywordResponse: ((response: Response) => void) | undefined;
+let delayInitialListingsResponse = false;
+let pendingInitialListingsResponse: ((response: Response) => void) | undefined;
 
 function setVisibility(visibilityState: DocumentVisibilityState): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: visibilityState });
@@ -60,6 +62,8 @@ beforeEach(() => {
   locationRequestUrls = [];
   categoryRequestUrls = [];
   pendingKeywordResponse = undefined;
+  delayInitialListingsResponse = false;
+  pendingInitialListingsResponse = undefined;
   setVisibility("visible");
   vi.stubGlobal(
     "fetch",
@@ -67,6 +71,12 @@ beforeEach(() => {
       const url = new URL(input instanceof Request ? input.url : input.toString());
       if (url.pathname === "/api/listings") {
         listingRequestUrls.push(url);
+        if (delayInitialListingsResponse) {
+          delayInitialListingsResponse = false;
+          return new Promise<Response>((resolve) => {
+            pendingInitialListingsResponse = resolve;
+          });
+        }
         if (url.searchParams.get("keyword") === "updating") {
           return new Promise<Response>((resolve) => {
             pendingKeywordResponse = resolve;
@@ -267,6 +277,37 @@ describe("ListingBrowserPage", () => {
     expect(listingRequestUrls.length).toBeGreaterThan(listingsBeforeBoundary);
     expect(locationRequestUrls.length).toBeGreaterThan(locationsBeforeBoundary);
     expect(categoryRequestUrls.length).toBeGreaterThan(categoriesBeforeBoundary);
+  });
+
+  it("detects a closing boundary when initial listings arrive after the minute tick", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-07-15T19:00:00Z"));
+    activeListing = { ...listing, closing_at: "2026-07-15T19:01:00Z" };
+    delayInitialListingsResponse = true;
+    renderPage();
+
+    await waitFor(() => expect(pendingInitialListingsResponse).toBeDefined());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    if (!pendingInitialListingsResponse) {
+      throw new Error("Expected the initial listings request to be pending.");
+    }
+    pendingInitialListingsResponse(
+      new Response(
+        JSON.stringify({
+          items: [activeListing],
+          page_info: { page: 1, page_size: 25, total_items: 1, total_pages: 1 },
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Some active listings have reached their scheduled closing time."),
+    ).toBeInTheDocument();
   });
 
   it("refetches listings and view-scoped facets on focus only after a hidden active item crosses", async () => {
