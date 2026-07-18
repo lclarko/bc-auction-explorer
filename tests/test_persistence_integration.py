@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
-from pydantic import ValidationError
 from sqlalchemy import inspect, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -19,6 +18,7 @@ from bc_auction.models import AuctionDetailRecord, AuctionStatus
 from bc_auction.persistence import (
     AuctionRepository,
     IdentityConflictError,
+    PersistenceError,
     ScrapeRunCounts,
     ScrapeRunInput,
     ScrapeRunMetrics,
@@ -509,9 +509,11 @@ def test_repository_revalidates_session_free_trusted_remap_urls(
         }
     )
 
-    with pytest.raises(ValidationError, match="session-free"):
+    with pytest.raises(PersistenceError, match="failed validation") as session_error:
         repository.persist_reconciled_record(run_id, session_bearing_remap)
-    with pytest.raises(ValidationError, match="BC Auction HTTPS host"):
+    assert "sessionID" not in str(session_error.value)
+    assert "private" not in str(session_error.value)
+    with pytest.raises(PersistenceError, match="failed validation"):
         repository.persist_reconciled_record(run_id, external_remap)
 
     with repository._engine.connect() as connection:

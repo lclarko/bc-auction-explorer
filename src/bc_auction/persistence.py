@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import Connection, Engine, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError
@@ -363,8 +363,11 @@ class AuctionRepository:
         run_id: UUID,
         record: PersistedAuctionRecord,
     ) -> PersistResult:
-        record = PersistedAuctionRecord.model_validate(record.model_dump())
-        record = _persisted_record(_persistence_input_from_record(record))
+        try:
+            record = PersistedAuctionRecord.model_validate(record.model_dump())
+            record = _persisted_record(_persistence_input_from_record(record))
+        except ValidationError:
+            raise PersistenceError("persistence record failed validation") from None
         try:
             with self._engine.begin() as connection:
                 return self._persist_record(connection, run_id, record)
