@@ -44,8 +44,14 @@ const endedOpenListing = {
   title: "Passed closing office chair",
 };
 
+const secondActiveListing = {
+  ...listing,
+  source_id: "ACTIVE-456",
+  title: "Second active listing",
+};
+
 let activeListing = listing;
-let activeTotalPages = 1;
+let additionalActiveListings: Array<typeof listing> = [];
 let listingRequestUrls: URL[] = [];
 let locationRequestUrls: URL[] = [];
 let categoryRequestUrls: URL[] = [];
@@ -59,7 +65,7 @@ function setVisibility(visibilityState: DocumentVisibilityState): void {
 
 beforeEach(() => {
   activeListing = listing;
-  activeTotalPages = 1;
+  additionalActiveListings = [];
   listingRequestUrls = [];
   locationRequestUrls = [];
   categoryRequestUrls = [];
@@ -86,16 +92,25 @@ beforeEach(() => {
         }
         const page = Number(url.searchParams.get("page") ?? "1");
         const view = url.searchParams.get("view") ?? "active";
-        const totalPages = view === "ended" ? 1 : activeTotalPages;
-        const items = view === "ended" ? [endedOpenListing] : page <= totalPages ? [activeListing] : [];
+        const activeItems = [activeListing, ...additionalActiveListings];
+        const dataset =
+          view === "ended"
+            ? [endedOpenListing]
+            : view === "all"
+              ? [...activeItems, endedOpenListing]
+              : activeItems;
+        const pageSize = Number(url.searchParams.get("page_size") ?? "25");
+        const totalPages = Math.ceil(dataset.length / pageSize);
+        const offset = (page - 1) * pageSize;
+        const items = page > totalPages ? [] : dataset.slice(offset, offset + pageSize);
         return Promise.resolve(
           new Response(
             JSON.stringify({
               items,
               page_info: {
                 page,
-                page_size: 25,
-                total_items: totalPages,
+                page_size: pageSize,
+                total_items: dataset.length,
                 total_pages: totalPages,
               },
             }),
@@ -174,7 +189,11 @@ describe("ListingBrowserPage", () => {
 
   it("applies Show through the form, resets the page, and scopes facet requests", async () => {
     const user = userEvent.setup();
-    activeTotalPages = 2;
+    additionalActiveListings = Array.from({ length: 25 }, (_, index) => ({
+      ...secondActiveListing,
+      source_id: `ACTIVE-${index + 1}`,
+      title: `Active listing ${index + 1}`,
+    }));
     renderPage("/?page=2&sort=price_high");
 
     const show = await screen.findByRole("combobox", { name: "Show" });
@@ -207,15 +226,32 @@ describe("ListingBrowserPage", () => {
     });
   });
 
-  it("returns an out-of-range empty page to the first page", async () => {
-    renderPage("/?page=2");
+  it("renders active and ended datasets together in the All view", async () => {
+    renderPage("/?view=all");
 
-    await waitFor(() => {
-      expect(listingRequestUrls.length).toBeGreaterThanOrEqual(2);
-    });
-    expect(listingRequestUrls[0]?.searchParams.get("page")).toBe("2");
-    expect(listingRequestUrls.at(-1)?.searchParams.get("page")).toBe("1");
+    expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
+    expect(screen.getByText("2 listings")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Passed closing office chair" })).toBeInTheDocument();
   });
+
+  it.each([
+    ["active", "1"],
+    ["ended", "1"],
+    ["all", "1"],
+  ])(
+    "returns an out-of-range %s page to its last valid page",
+    async (view, expectedPage) => {
+      renderPage(`/?view=${view}&page=99`);
+
+      await waitFor(() => {
+        expect(listingRequestUrls.length).toBeGreaterThanOrEqual(2);
+      });
+      expect(listingRequestUrls[0]?.searchParams.get("view")).toBe(view);
+      expect(listingRequestUrls[0]?.searchParams.get("page")).toBe("99");
+      expect(listingRequestUrls.at(-1)?.searchParams.get("view")).toBe(view);
+      expect(listingRequestUrls.at(-1)?.searchParams.get("page")).toBe(expectedPage);
+    },
+  );
 
   it("announces an update instead of a stale result count", async () => {
     const user = userEvent.setup();
