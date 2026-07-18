@@ -160,11 +160,41 @@ def convert_reconciled_record(
         "status": record.status,
         "observed_at": observed_at,
     }
+    return _persisted_record(data)
+
+
+def _persisted_record(data: _PersistenceInput) -> PersistedAuctionRecord:
     return PersistedAuctionRecord(
         **data,
         metadata_hash=metadata_hash(data),
         observation_hash=observation_hash(data),
     )
+
+
+def _persistence_input_from_record(record: PersistedAuctionRecord) -> _PersistenceInput:
+    return {
+        "source_id": record.source_id,
+        "source_dis_id": record.source_dis_id,
+        "canonical_source_url": record.canonical_source_url,
+        "title": record.title,
+        "description": record.description,
+        "category_raw": record.category_raw,
+        "category_canonical": record.category_canonical,
+        "location_raw": record.location_raw,
+        "location_canonical": record.location_canonical,
+        "location_qualifier": record.location_qualifier,
+        "location_normalization_status": record.location_normalization_status,
+        "pickup_details": record.pickup_details,
+        "image_urls": record.image_urls,
+        "current_bid": record.current_bid,
+        "minimum_bid": record.minimum_bid,
+        "starting_bid": record.starting_bid,
+        "bid_count": record.bid_count,
+        "closing_at": record.closing_at,
+        "status_raw": record.status_raw,
+        "status": record.status,
+        "observed_at": record.observed_at,
+    }
 
 
 def metadata_hash(data: _PersistenceInput) -> str:
@@ -334,6 +364,7 @@ class AuctionRepository:
         record: PersistedAuctionRecord,
     ) -> PersistResult:
         record = PersistedAuctionRecord.model_validate(record.model_dump())
+        record = _persisted_record(_persistence_input_from_record(record))
         try:
             with self._engine.begin() as connection:
                 return self._persist_record(connection, run_id, record)

@@ -524,6 +524,34 @@ def test_repository_revalidates_session_free_trusted_remap_urls(
     assert len(observations) == 1
 
 
+def test_repository_recomputes_hashes_for_a_copied_record(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    initial = convert_reconciled_record(
+        _detail(),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    copied_with_changed_fields = initial.model_copy(
+        update={
+            "title": "Updated utility vehicle",
+            "current_bid": Decimal("30.00"),
+            "observed_at": datetime(2026, 7, 15, 1, tzinfo=UTC),
+        }
+    )
+
+    repository.persist_reconciled_record(run_id, initial)
+    result = repository.persist_reconciled_record(run_id, copied_with_changed_fields)
+
+    assert result.updated is True
+    assert result.observation_created is True
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
+    assert item["title"] == "Updated utility vehicle"
+    assert len(observations) == 2
+
+
 def test_document_remap_does_not_reopen_a_terminal_item(
     repository: AuctionRepository,
 ) -> None:
