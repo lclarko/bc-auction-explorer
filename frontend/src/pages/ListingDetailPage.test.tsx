@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ListingDetailPage } from "./ListingDetailPage";
 
 const detail = {
+  availability: "active",
   bid_count: 2,
   canonical_source_url: "https://www.bcauction.ca/open?id=ABC-123",
   category: "Office",
@@ -25,6 +26,7 @@ const detail = {
   location_qualifier: null,
   location_raw: "Victoria",
   minimum_bid: "10.00",
+  observed_at: "2026-07-16T19:00:00Z",
   pickup_details: null,
   source_id: "ABC-123",
   starting_bid: null,
@@ -68,5 +70,30 @@ describe("ListingDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a scheduled closing pass distinct from the source Open status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              ...detail,
+              availability: "scheduled_closing_passed",
+              closing_at: "2026-07-15T19:00:00Z",
+              observed_at: "2026-07-15T18:00:00Z",
+            }),
+            { headers: { "Content-Type": "application/json" } },
+          ),
+        ),
+      ),
+    );
+
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
+    expect(screen.getByText("Open", { selector: ".status-badge" })).toBeInTheDocument();
+    expect(screen.getByText(/Scheduled closing time passed .* Last observed open at/)).toBeInTheDocument();
   });
 });

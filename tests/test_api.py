@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 from dataclasses import asdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -20,12 +20,17 @@ from bc_auction.persistence import (
 from bc_auction.read_repository import AuctionReadRepository
 
 pytestmark = pytest.mark.integration
+_REQUEST_TIME = datetime(2026, 7, 16, 12, tzinfo=UTC)
+
+
+def _test_now() -> datetime:
+    return _REQUEST_TIME
 
 
 @pytest.fixture
 def client(repository: AuctionRepository) -> Iterator[TestClient]:
     with TestClient(
-        create_app(engine=repository._engine),
+        create_app(engine=repository._engine, now_provider=_test_now),
         raise_server_exceptions=False,
     ) as api_client:
         yield api_client
@@ -168,11 +173,11 @@ def test_listings_filter_sort_and_paginate(
         "keyword": "utility",
         "location": "victoria",
         "category": "vehicles",
-        "status": "open",
         "min_price": "20",
         "max_price": "30",
-        "closing_after": "2026-07-16T00:00:00Z",
-        "closing_before": "2026-07-17T23:59:59Z",
+        "closing_after": "2026-07-15T17:00:00-07:00",
+        "closing_before": "2026-07-17T16:59:59-07:00",
+        "view": "all",
         "sort": "price_high",
         "page_size": 1,
     }
@@ -188,6 +193,8 @@ def test_listings_filter_sort_and_paginate(
     }
     assert [item["source_id"] for item in payload["items"]] == ["A000002"]
     assert Decimal(payload["items"][0]["current_bid"]) == Decimal("30.00")
+    assert payload["items"][0]["availability"] == "scheduled_closing_passed"
+    assert payload["items"][0]["observed_at"] == "2026-07-16T00:00:00Z"
     assert payload["items"][0]["canonical_source_url"] == (
         "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733642"
     )
@@ -246,12 +253,25 @@ def test_listing_detail_preserves_terminal_current_snapshot(
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "closed"
+    assert payload["availability"] == "closed"
     assert Decimal(payload["current_bid"]) == Decimal("30.00")
     assert payload["title"] == "Closed utility vehicle"
     assert payload["description"] == "Description for Closed utility vehicle"
     assert payload["closed_at"] is not None
+    assert payload["observed_at"] == "2026-07-16T01:00:00Z"
     assert "source_dis_id" not in payload
     assert "current_observation_hash" not in payload
+
+    ended = client.get("/api/listings", params={"view": "ended", "page_size": 10})
+
+    assert ended.status_code == 200
+    ended_item = ended.json()["items"][0]
+    assert ended.json()["page_info"]["total_items"] == 1
+    assert ended_item["availability"] == "closed"
+    assert Decimal(ended_item["current_bid"]) == Decimal("30.00")
+    assert ended_item["observed_at"] == "2026-07-16T01:00:00Z"
+    assert ended_item["status"] == "closed"
+    assert ended_item["title"] == "Closed utility vehicle"
 
 
 def test_listing_sorts_are_deterministic_and_put_nulls_last(
@@ -318,9 +338,195 @@ def test_listing_sorts_are_deterministic_and_put_nulls_last(
         "most_bids": ["A000001", "A000002", "A000003", "A000004"],
     }
     for sort, expected_source_ids in expected_orders.items():
-        response = client.get("/api/listings", params={"sort": sort, "page_size": 10})
+        response = client.get(
+            "/api/listings",
+            params={"view": "all", "sort": sort, "page_size": 10},
+        )
         assert response.status_code == 200
         assert [item["source_id"] for item in response.json()["items"]] == expected_source_ids
+
+
+def test_listing_views_scope_current_observations_facets_and_availability(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    observed_at = _REQUEST_TIME - timedelta(hours=2)
+    records = (
+        (
+            "A000001",
+            "8733641",
+            "Future open listing",
+            _REQUEST_TIME + timedelta(hours=1),
+            "Active City",
+            "Active category",
+            AuctionStatus.OPEN,
+        ),
+        (
+            "A000002",
+            "8733642",
+            "Open listing without a closing time",
+            None,
+            "No deadline City",
+            "No deadline category",
+            AuctionStatus.OPEN,
+        ),
+        (
+            "A000003",
+            "8733643",
+            "Open listing closing now",
+            _REQUEST_TIME,
+            "Scheduled City",
+            "Scheduled category",
+            AuctionStatus.OPEN,
+        ),
+        (
+            "A000004",
+            "8733644",
+            "Open listing with a passed closing time",
+            _REQUEST_TIME - timedelta(hours=1),
+            "Passed City",
+            "Passed category",
+            AuctionStatus.OPEN,
+        ),
+        (
+            "A000005",
+            "8733645",
+            "Closed listing with a future closing time",
+            _REQUEST_TIME + timedelta(hours=2),
+            "Closed City",
+            "Closed category",
+            AuctionStatus.CLOSED,
+        ),
+        (
+            "A000006",
+            "8733646",
+            "Withdrawn listing without a closing time",
+            None,
+            "Withdrawn City",
+            "Withdrawn category",
+            AuctionStatus.WITHDRAWN,
+        ),
+        (
+            "A000007",
+            "8733647",
+            "Unknown source status listing",
+            _REQUEST_TIME + timedelta(hours=3),
+            "Unknown City",
+            "Unknown category",
+            AuctionStatus.UNKNOWN,
+        ),
+    )
+    for source_id, display_id, title, closing_at, location, category, status in records:
+        _persist(
+            repository,
+            run_id,
+            _detail(
+                source_id,
+                display_id,
+                title=title,
+                current_bid=Decimal("20.00"),
+                closing_at=closing_at,
+                location=location,
+                category=category,
+                status=status,
+            ),
+            observed_at=observed_at,
+        )
+    _finish(repository, run_id)
+
+    calls = 0
+
+    def now_provider() -> datetime:
+        nonlocal calls
+        calls += 1
+        return _REQUEST_TIME
+
+    with TestClient(
+        create_app(engine=repository._engine, now_provider=now_provider),
+        raise_server_exceptions=False,
+    ) as api_client:
+        active = api_client.get("/api/listings", params={"page_size": 10})
+        assert calls == 1
+        ended = api_client.get("/api/listings", params={"view": "ended", "page_size": 10})
+        assert calls == 2
+        ended_closing_soon = api_client.get(
+            "/api/listings",
+            params={"view": "ended", "sort": "closing_soon", "page_size": 10},
+        )
+        assert calls == 3
+        all_listings = api_client.get("/api/listings", params={"view": "all", "page_size": 10})
+        assert calls == 4
+        active_locations = api_client.get("/api/locations")
+        assert calls == 5
+        ended_categories = api_client.get("/api/categories", params={"view": "ended"})
+        assert calls == 6
+        unknown_detail = api_client.get("/api/listings/A000007")
+        assert calls == 7
+
+    assert active.status_code == 200
+    active_payload = active.json()
+    assert active_payload["page_info"]["total_items"] == 2
+    assert [item["source_id"] for item in active_payload["items"]] == ["A000001", "A000002"]
+    assert [item["availability"] for item in active_payload["items"]] == ["active", "unknown"]
+    assert active_payload["items"][0]["observed_at"] == "2026-07-16T10:00:00Z"
+
+    assert ended.status_code == 200
+    ended_payload = ended.json()
+    assert ended_payload["page_info"]["total_items"] == 4
+    assert [item["source_id"] for item in ended_payload["items"]] == [
+        "A000005",
+        "A000003",
+        "A000004",
+        "A000006",
+    ]
+    assert [item["availability"] for item in ended_payload["items"]] == [
+        "closed",
+        "scheduled_closing_passed",
+        "scheduled_closing_passed",
+        "withdrawn",
+    ]
+    passed_open = next(item for item in ended_payload["items"] if item["source_id"] == "A000004")
+    assert passed_open["status"] == "open"
+    assert passed_open["closed_at"] is None
+
+    assert ended_closing_soon.status_code == 200
+    assert [item["source_id"] for item in ended_closing_soon.json()["items"]] == [
+        "A000004",
+        "A000003",
+        "A000005",
+        "A000006",
+    ]
+
+    assert all_listings.status_code == 200
+    all_payload = all_listings.json()
+    assert all_payload["page_info"]["total_items"] == 7
+    assert [item["source_id"] for item in all_payload["items"]] == [
+        "A000004",
+        "A000003",
+        "A000001",
+        "A000005",
+        "A000007",
+        "A000002",
+        "A000006",
+    ]
+    assert all_payload["items"][4]["availability"] == "unknown"
+
+    assert active_locations.status_code == 200
+    assert active_locations.json()["items"] == [
+        {"value": "Active City", "count": 1},
+        {"value": "No deadline City", "count": 1},
+    ]
+    assert ended_categories.status_code == 200
+    assert ended_categories.json()["items"] == [
+        {"value": "Closed category", "count": 1},
+        {"value": "Passed category", "count": 1},
+        {"value": "Scheduled category", "count": 1},
+        {"value": "Withdrawn category", "count": 1},
+    ]
+
+    assert unknown_detail.status_code == 200
+    assert unknown_detail.json()["availability"] == "unknown"
+    assert unknown_detail.json()["observed_at"] == "2026-07-16T10:00:00Z"
 
 
 def test_facets_and_scrape_status_exclude_persistence_details(
@@ -427,7 +633,12 @@ def test_api_returns_stable_errors_without_database_details(
     assert invalid_page_size.json()["error"]["code"] == "validation_error"
     assert "input" not in invalid_page_size.json()["error"]["details"][0]
 
-    def unavailable(_: AuctionReadRepository, __: object) -> object:
+    def unavailable(
+        _: AuctionReadRepository,
+        __: object,
+        *,
+        request_time: datetime,
+    ) -> object:
         raise OperationalError("SELECT 1", {}, RuntimeError("database details"))
 
     monkeypatch.setattr(AuctionReadRepository, "list_listings", unavailable)

@@ -7,7 +7,7 @@ import { getListing } from "../api/client";
 import { ImageGallery } from "../components/ImageGallery";
 import { StatusBadge } from "../components/StatusBadge";
 import { bidCount, currency } from "../lib/format";
-import { pacificDateTime } from "../lib/time";
+import { listingLifecycleText, pacificDateTime, useLifecycleClock } from "../lib/time";
 import { isListingNotFound } from "./ListingBrowserPage";
 
 function detailErrorMessage(error: unknown): string {
@@ -19,6 +19,7 @@ export function ListingDetailPage() {
   const [searchParameters] = useSearchParams();
   const from = searchParameters.get("from");
   const backTo = from ? `/?${from}` : "/";
+  const now = useLifecycleClock();
   const listing = useQuery({
     enabled: Boolean(sourceId),
     queryKey: ["listing", sourceId],
@@ -67,6 +68,9 @@ export function ListingDetailPage() {
   const locationDetail = item.location_qualifier ? `${location}, ${item.location_qualifier}` : location;
   const rawLocation =
     item.location_normalization_status === "unknown" && item.location_raw ? item.location_raw : null;
+  const lifecycleText = item.availability
+    ? listingLifecycleText(item.availability, item.status, item.closing_at, item.last_seen_at, now)
+    : null;
 
   return (
     <article className="listing-detail">
@@ -126,6 +130,7 @@ export function ListingDetailPage() {
               </div>
             ) : null}
           </dl>
+          {lifecycleText ? <p className="closing-passed">{lifecycleText}</p> : null}
           <p className="source-link">
             <a href={item.canonical_source_url}>View the source listing</a>
           </p>

@@ -66,10 +66,20 @@ Initial endpoints:
 - `GET /api/categories`
 - `GET /api/scrape-status`
 
-Listings support keyword, location, category, status, bid, and closing-time filters;
-bounded pagination; and deterministic sorting. API responses expose canonical public
-listing and image URLs only, use UTC timestamps, and omit request/session data, source
-HTML, persistence IDs, hashes, and scrape error details.
+The browser defaults to the Active auctions view. The Ended auctions view shows source-confirmed
+closed or withdrawn listings, along with open listings whose scheduled closing time has
+passed. All auctions includes every indexed listing. The API exposes the same lifecycle
+views through `view=active`, `view=ended`, and `view=all`, alongside keyword, location,
+category, bid, and closing-time filters; bounded pagination; and deterministic sorting.
+Location and category facets are scoped to the selected view.
+Source-open listings without a closing time remain in Active and show the closing time
+as unavailable.
+
+A scheduled closing time passing never overwrites the source status. An open listing
+whose scheduled closing time has passed is clearly marked as last observed open, not
+closed, until the source confirms a terminal status. API responses expose canonical
+public listing and image URLs only, use UTC timestamps, and omit request/session data,
+source HTML, persistence IDs, hashes, and scrape error details.
 
 For deployment, give the API database role `SELECT`-only access. The application has no
 write routes and its query layer issues only read statements.

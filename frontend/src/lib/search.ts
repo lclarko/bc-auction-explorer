@@ -1,7 +1,6 @@
-import type { AuctionStatus, ListingQuery, ListingSort } from "../api/client";
+import type { ListingQuery, ListingSort, ListingView } from "../api/client";
 import { dateInputToUtc } from "./time";
 
-const statuses: readonly AuctionStatus[] = ["open", "closed", "withdrawn", "unknown"];
 const sorts: readonly ListingSort[] = [
   "closing_soon",
   "closing_latest",
@@ -10,6 +9,14 @@ const sorts: readonly ListingSort[] = [
   "newest_seen",
   "most_bids",
 ];
+
+const views: readonly ListingView[] = ["active", "ended", "all"];
+
+export const defaultListingSorts: Record<ListingView, ListingSort> = {
+  active: "closing_soon",
+  ended: "closing_latest",
+  all: "closing_soon",
+};
 
 export const defaultListingSearch = {
   category: "",
@@ -20,8 +27,8 @@ export const defaultListingSearch = {
   maxPrice: "",
   minPrice: "",
   page: 1,
-  sort: "closing_soon" as ListingSort,
-  status: "open" as AuctionStatus,
+  sort: null as ListingSort | null,
+  view: "active" as ListingView,
 };
 
 export type ListingSearch = typeof defaultListingSearch;
@@ -38,14 +45,12 @@ function validFilter(value: string): string {
   return value.length <= maximumFilterLength ? value : "";
 }
 
-function validStatus(value: string): AuctionStatus {
-  return statuses.includes(value as AuctionStatus)
-    ? (value as AuctionStatus)
-    : defaultListingSearch.status;
+function validView(value: string): ListingView {
+  return views.includes(value as ListingView) ? (value as ListingView) : defaultListingSearch.view;
 }
 
-function validSort(value: string): ListingSort {
-  return sorts.includes(value as ListingSort) ? (value as ListingSort) : defaultListingSearch.sort;
+function validSort(value: string): ListingSort | null {
+  return sorts.includes(value as ListingSort) ? (value as ListingSort) : null;
 }
 
 function validPage(value: string): number {
@@ -69,6 +74,8 @@ function validDate(value: string): string {
 }
 
 export function parseListingSearch(parameters: URLSearchParams): ListingSearch {
+  const view = validView(stringValue(parameters, "view"));
+  const parsedSort = validSort(stringValue(parameters, "sort"));
   return {
     category: validFilter(stringValue(parameters, "category")),
     closingAfter: validDate(stringValue(parameters, "closing_after")),
@@ -78,8 +85,8 @@ export function parseListingSearch(parameters: URLSearchParams): ListingSearch {
     maxPrice: validDecimal(stringValue(parameters, "max_price")),
     minPrice: validDecimal(stringValue(parameters, "min_price")),
     page: validPage(stringValue(parameters, "page")),
-    sort: validSort(stringValue(parameters, "sort")),
-    status: validStatus(stringValue(parameters, "status")),
+    sort: parsedSort,
+    view,
   };
 }
 
@@ -94,14 +101,14 @@ export function listingSearchParams(search: ListingSearch): URLSearchParams {
   add("keyword", search.keyword.trim());
   add("location", search.location.trim());
   add("category", search.category.trim());
-  if (search.status !== defaultListingSearch.status) {
-    parameters.set("status", search.status);
+  if (search.view !== defaultListingSearch.view) {
+    parameters.set("view", search.view);
   }
   add("min_price", search.minPrice);
   add("max_price", search.maxPrice);
   add("closing_after", search.closingAfter);
   add("closing_before", search.closingBefore);
-  if (search.sort !== defaultListingSearch.sort) {
+  if (search.sort !== null) {
     parameters.set("sort", search.sort);
   }
   if (search.page > 1) {
@@ -121,9 +128,13 @@ export function listingQuery(search: ListingSearch): ListingQuery {
     min_price: search.minPrice || undefined,
     page: search.page,
     page_size: 25,
-    sort: search.sort,
-    status: search.status,
+    sort: effectiveListingSort(search),
+    view: search.view,
   };
+}
+
+export function effectiveListingSort(search: ListingSearch): ListingSort {
+  return search.sort ?? defaultListingSorts[search.view];
 }
 
 export function withFirstPage(search: ListingSearch): ListingSearch {

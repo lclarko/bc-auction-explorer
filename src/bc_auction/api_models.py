@@ -20,6 +20,20 @@ class ListingSort(StrEnum):
     MOST_BIDS = "most_bids"
 
 
+class ListingView(StrEnum):
+    ACTIVE = "active"
+    ENDED = "ended"
+    ALL = "all"
+
+
+class ListingAvailability(StrEnum):
+    ACTIVE = "active"
+    SCHEDULED_CLOSING_PASSED = "scheduled_closing_passed"
+    CLOSED = "closed"
+    WITHDRAWN = "withdrawn"
+    UNKNOWN = "unknown"
+
+
 class ScrapeRunState(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -67,6 +81,8 @@ class ListingSummary(_TimestampedModel):
     bid_count: int | None = Field(default=None, ge=0)
     closing_at: datetime | None = None
     status: AuctionStatus
+    availability: ListingAvailability
+    observed_at: datetime
     first_seen_at: datetime
     last_seen_at: datetime
     last_changed_at: datetime

@@ -15,6 +15,7 @@ describe("typed API client", () => {
         return HttpResponse.json({
           items: [
             {
+              availability: "active",
               bid_count: 0,
               canonical_source_url: "https://www.bcauction.ca/open?id=ABC-123",
               closing_at: "2026-07-20T19:00:00Z",
@@ -25,6 +26,7 @@ describe("typed API client", () => {
               last_seen_at: "2026-07-16T19:00:00Z",
               location: "Victoria",
               minimum_bid: "0.00",
+              observed_at: "2026-07-16T19:00:00Z",
               source_id: "ABC-123",
               status: "open",
               title: "Surplus office chair",
@@ -35,14 +37,14 @@ describe("typed API client", () => {
       }),
     );
 
-    const page = await getListings({ page: 1, page_size: 25, sort: "closing_soon", status: "open" });
+    const page = await getListings({ page: 1, page_size: 25, sort: "closing_soon", view: "active" });
 
     expect(page.page_info.total_items).toBe(1);
     expect(page.items[0]?.source_id).toBe("ABC-123");
     expect(requestUrl?.searchParams.get("page")).toBe("1");
     expect(requestUrl?.searchParams.get("page_size")).toBe("25");
     expect(requestUrl?.searchParams.get("sort")).toBe("closing_soon");
-    expect(requestUrl?.searchParams.get("status")).toBe("open");
+    expect(requestUrl?.searchParams.get("view")).toBe("active");
   });
 
   it("normalizes a structured API error", async () => {
@@ -59,7 +61,7 @@ describe("typed API client", () => {
       page: 1,
       page_size: 25,
       sort: "closing_soon",
-      status: "open",
+      view: "active",
     }).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ApiRequestError);
