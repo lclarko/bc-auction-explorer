@@ -8,6 +8,8 @@ export type ListingPage = components["schemas"]["ListingPage"];
 export type FacetList = components["schemas"]["FacetList"];
 export type ScrapeStatus = components["schemas"]["ScrapeStatus"];
 export type AuctionStatus = components["schemas"]["AuctionStatus"];
+export type ListingView = components["schemas"]["ListingView"];
+export type ListingAvailability = components["schemas"]["ListingAvailability"];
 export type ListingSort = components["schemas"]["ListingSort"];
 export type ListingQuery = NonNullable<
   operations["list_listings_api_listings_get"]["parameters"]["query"]
@@ -73,12 +75,12 @@ export function getListing(sourceId: string, signal?: AbortSignal): Promise<List
   );
 }
 
-export function getLocations(signal?: AbortSignal): Promise<FacetList> {
-  return unwrap(client.GET("/api/locations", { params: { query: { limit: 500 } }, signal }));
+export function getLocations(view: ListingView, signal?: AbortSignal): Promise<FacetList> {
+  return unwrap(client.GET("/api/locations", { params: { query: { limit: 500, view } }, signal }));
 }
 
-export function getCategories(signal?: AbortSignal): Promise<FacetList> {
-  return unwrap(client.GET("/api/categories", { params: { query: { limit: 500 } }, signal }));
+export function getCategories(view: ListingView, signal?: AbortSignal): Promise<FacetList> {
+  return unwrap(client.GET("/api/categories", { params: { query: { limit: 500, view } }, signal }));
 }
 
 export function getScrapeStatus(signal?: AbortSignal): Promise<ScrapeStatus> {

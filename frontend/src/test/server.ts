@@ -4,6 +4,7 @@ import { setupServer } from "msw/node";
 import type { FacetList, ListingDetail, ListingPage, ListingSummary, ScrapeStatus } from "../api/client";
 
 const listing = {
+  availability: "active",
   bid_count: 0,
   canonical_source_url: "https://www.bcauction.ca/open?id=ABC-123",
   closing_at: "2026-07-20T19:00:00Z",
@@ -14,6 +15,7 @@ const listing = {
   last_seen_at: "2026-07-16T19:00:00Z",
   location: "Victoria",
   minimum_bid: "0.00",
+  observed_at: "2026-07-16T19:00:00Z",
   source_id: "ABC-123",
   status: "open" as const,
   title: "Surplus office chair",

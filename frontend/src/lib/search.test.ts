@@ -1,16 +1,41 @@
 import { describe, expect, it } from "vitest";
 
 import { currency } from "./format";
-import { listingQuery, listingSearchParams, parseListingSearch } from "./search";
+import {
+  effectiveListingSort,
+  listingQuery,
+  listingSearchParams,
+  parseListingSearch,
+  withFirstPage,
+} from "./search";
 import { dateInputToUtc } from "./time";
 
 describe("listing search state", () => {
-  it("keeps the default open and closing-soon state out of the URL", () => {
+  it("keeps the default active view and its closing-soon sort out of the URL", () => {
     const search = parseListingSearch(new URLSearchParams());
 
-    expect(search.status).toBe("open");
-    expect(search.sort).toBe("closing_soon");
+    expect(search.view).toBe("active");
+    expect(search.sort).toBeNull();
+    expect(effectiveListingSort(search)).toBe("closing_soon");
     expect(listingSearchParams(search).toString()).toBe("");
+  });
+
+  it("uses view-specific defaults while preserving an explicit sort", () => {
+    const ended = parseListingSearch(new URLSearchParams("view=ended"));
+    const endedWithExplicitDefault = parseListingSearch(
+      new URLSearchParams("view=ended&sort=closing_latest"),
+    );
+    const all = parseListingSearch(new URLSearchParams("view=all&sort=price_high&page=3"));
+
+    expect(ended.sort).toBeNull();
+    expect(effectiveListingSort(ended)).toBe("closing_latest");
+    expect(listingSearchParams(ended).toString()).toBe("view=ended");
+    expect(endedWithExplicitDefault.sort).toBe("closing_latest");
+    expect(listingSearchParams(endedWithExplicitDefault).toString()).toBe(
+      "view=ended&sort=closing_latest",
+    );
+    expect(effectiveListingSort(all)).toBe("price_high");
+    expect(listingSearchParams(withFirstPage(all)).toString()).toBe("view=all&sort=price_high");
   });
 
   it("preserves a zero price and converts Pacific date bounds to UTC", () => {
@@ -22,12 +47,14 @@ describe("listing search state", () => {
     expect(query.min_price).toBe("0");
     expect(query.closing_after).toBe("2026-03-08T08:00:00.000Z");
     expect(query.closing_before).toBe("2026-11-02T07:59:59.999Z");
+    expect(query.view).toBe("active");
+    expect(query.sort).toBe("closing_soon");
   });
 
   it("rejects invalid URL values", () => {
     const search = parseListingSearch(
       new URLSearchParams(
-        "status=not-a-status&sort=surprise&page=0&min_price=-1&closing_after=2026-02-30",
+        "view=not-a-view&sort=surprise&page=0&min_price=-1&closing_after=2026-02-30",
       ),
     );
 
@@ -35,8 +62,8 @@ describe("listing search state", () => {
       closingAfter: "",
       minPrice: "",
       page: 1,
-      sort: "closing_soon",
-      status: "open",
+      sort: null,
+      view: "active",
     });
   });
 
