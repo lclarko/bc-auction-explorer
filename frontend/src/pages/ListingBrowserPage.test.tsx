@@ -45,6 +45,7 @@ const endedOpenListing = {
 };
 
 let activeListing = listing;
+let activeTotalPages = 1;
 let listingRequestUrls: URL[] = [];
 let locationRequestUrls: URL[] = [];
 let categoryRequestUrls: URL[] = [];
@@ -58,6 +59,7 @@ function setVisibility(visibilityState: DocumentVisibilityState): void {
 
 beforeEach(() => {
   activeListing = listing;
+  activeTotalPages = 1;
   listingRequestUrls = [];
   locationRequestUrls = [];
   categoryRequestUrls = [];
@@ -84,7 +86,8 @@ beforeEach(() => {
         }
         const page = Number(url.searchParams.get("page") ?? "1");
         const view = url.searchParams.get("view") ?? "active";
-        const items = view === "ended" ? [endedOpenListing] : page === 2 ? [] : [activeListing];
+        const totalPages = view === "ended" ? 1 : activeTotalPages;
+        const items = view === "ended" ? [endedOpenListing] : page <= totalPages ? [activeListing] : [];
         return Promise.resolve(
           new Response(
             JSON.stringify({
@@ -92,8 +95,8 @@ beforeEach(() => {
               page_info: {
                 page,
                 page_size: 25,
-                total_items: page === 2 ? 0 : 1,
-                total_pages: page === 2 ? 0 : 1,
+                total_items: totalPages,
+                total_pages: totalPages,
               },
             }),
             { headers: { "Content-Type": "application/json" } },
@@ -171,6 +174,7 @@ describe("ListingBrowserPage", () => {
 
   it("applies Show through the form, resets the page, and scopes facet requests", async () => {
     const user = userEvent.setup();
+    activeTotalPages = 2;
     renderPage("/?page=2&sort=price_high");
 
     const show = await screen.findByRole("combobox", { name: "Show" });
