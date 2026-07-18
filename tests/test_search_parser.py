@@ -4,7 +4,9 @@ import pytest
 
 from bc_auction.errors import ParserContractError
 from bc_auction.parsers.search import (
+    ProductGroup,
     parse_browse_url,
+    parse_product_groups,
     parse_search_form,
     parse_session_id,
     parse_welcome_content_url,
@@ -85,6 +87,28 @@ def test_preserves_captured_form_fields_and_applies_open_auction_values() -> Non
 
     with pytest.raises(ParserContractError, match="did not permit display order"):
         form.open_auction_fields(display_order="UncapturedSort")
+
+
+def test_parses_product_groups_and_builds_group_search_fields() -> None:
+    html = _fixture("search-entry.html")
+    form = parse_search_form(
+        html,
+        "https://www.bcauction.ca/open.dll/showDocumentSearch?sessionID=SESSION_ID",
+    )
+
+    product_groups = parse_product_groups(html)
+
+    assert product_groups[0] == ProductGroup("5810716", "Antiques and Collectibles")
+    assert product_groups[-1] == ProductGroup("4369498", "Vehicles & Automotive")
+    assert len(product_groups) == 16
+    group_fields = dict(
+        form.product_group_fields(product_groups[0], keyword="truck", display_order="HighestPrice")
+    )
+    assert group_fields["Keyword"] == "truck"
+    assert group_fields["display_order"] == "HighestPrice"
+    assert group_fields["dllAnchor"] == ""
+    assert group_fields["productDisID"] == "5810716"
+    assert group_fields["productDesc"] == "Antiques and Collectibles"
 
 
 def test_rejects_a_search_form_that_is_not_posted() -> None:

@@ -104,6 +104,10 @@ def parse_search_results(html: str, page_url: str) -> SearchResultsPage:
     records = tuple(_parse_record(link, columns, page_url) for link in item_links)
     _ensure_unique_source_ids(records)
     pagination = _parse_pagination(soup, page_url)
+    if pagination is None:
+        if _page_urls(soup, page_url):
+            raise ParserContractError("paginated results page did not contain a record range")
+        return SearchResultsPage(records=records)
     _validate_pagination(pagination, record_count=len(records))
 
     return SearchResultsPage(records=records, pagination=pagination)
@@ -278,10 +282,10 @@ def _parse_closing_at(value: str) -> datetime:
         raise ParserContractError("auction closing date was not in the expected format") from exc
 
 
-def _parse_pagination(soup: BeautifulSoup, base_url: str) -> SearchPagination:
+def _parse_pagination(soup: BeautifulSoup, base_url: str) -> SearchPagination | None:
     range_match = _PAGE_RANGE.search(_text(soup))
     if range_match is None:
-        raise ParserContractError("results page did not contain a record range")
+        return None
     record_start, record_end, total_records = (int(value) for value in range_match.groups())
 
     current_pages = {

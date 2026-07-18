@@ -26,9 +26,10 @@ BC_AUCTION_DATABASE_URL=postgresql+psycopg://bc_auction:bc_auction@localhost:543
 
 `--limit` is always explicit. Start with a small run such as 20 or 100 listings,
 review the resulting scrape status, then increase the limit deliberately for a
-larger ingest. The scraper makes sequential public requests with a minimum request
-interval and respects source retry guidance; it does not attempt to bypass source
-access controls.
+larger ingest. The scraper enumerates the source's product groups because its
+"Browse All Open Auctions" view can omit listings. It makes sequential public
+requests with a minimum request interval and respects source retry guidance; it
+does not attempt to bypass source access controls.
 
 Each detail listing currently requires several public source requests, so a run's
 duration is governed by both source response time and the request interval. The

@@ -46,6 +46,19 @@ class _SuccessfulClient:
     def metrics(self) -> SourceRequestMetrics:
         return _SOURCE_METRICS
 
+    def prepare_open_auction_search(self) -> object:
+        return type("PreparedSearch", (), {"product_groups": (object(),)})()
+
+    def search_product_group(
+        self,
+        _search: object,
+        _product_group: object,
+        *,
+        keyword: str = "",
+        display_order: str = "EndingFirst",
+    ) -> FetchedPage:
+        return self.search_open_auctions(keyword=keyword, display_order=display_order)
+
     def search_open_auctions(
         self,
         *,
@@ -392,6 +405,39 @@ def test_collect_search_records_follows_pagination() -> None:
     assert collection.records[-1].source_id == "A277450"
     assert collection.pages_visited == 2
     assert len(client.requested_urls) == 1
+
+
+def test_collect_search_records_deduplicates_overlapping_product_groups() -> None:
+    class CategorizedClient(_SuccessfulClient):
+        def __init__(self) -> None:
+            self.product_groups_requested: list[object] = []
+            self.requested_urls: list[str] = []
+
+        def prepare_open_auction_search(self) -> object:
+            return type("PreparedSearch", (), {"product_groups": ("first", "second")})()
+
+        def search_product_group(
+            self,
+            _search: object,
+            product_group: object,
+            *,
+            keyword: str = "",
+            display_order: str = "EndingFirst",
+        ) -> FetchedPage:
+            self.product_groups_requested.append(product_group)
+            return _page("results-open-page-1.html", _RESULTS_URL, "text/html; charset=utf-8")
+
+        def get(self, page_url: str) -> FetchedPage:
+            self.requested_urls.append(page_url)
+            return _page("results-empty.html", page_url, "text/html; charset=utf-8")
+
+    client = CategorizedClient()
+    collection = cli._collect_search_records(client, 100)
+
+    assert len(collection.records) == 30
+    assert collection.pages_visited == 4
+    assert client.product_groups_requested == ["first", "second"]
+    assert len(client.requested_urls) == 2
 
 
 def test_manual_scrape_returns_one_when_search_enumeration_fails(monkeypatch, capsys) -> None:

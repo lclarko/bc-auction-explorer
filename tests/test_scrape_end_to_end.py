@@ -110,7 +110,8 @@ def test_scrape_cli_runs_the_full_mocked_flow_without_serializing_session_data(
                 fields = parse_qs(request.content.decode(), keep_blank_values=True)
                 assert fields["sessionID"] == [_SESSION_ID]
                 assert fields["display_order"] == ["EndingFirst"]
-                assert fields["productDisID"] == ["simpleAll"]
+                assert fields["productDisID"] == ["5810716"]
+                assert fields["productDesc"] == ["Antiques and Collectibles"]
                 return html_response(request, _fixture("results-open-page-1.html"))
 
             assert request.method == "GET"

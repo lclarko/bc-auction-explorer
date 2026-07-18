@@ -15,7 +15,7 @@ from uuid import UUID
 
 import httpx
 
-from bc_auction.client import AuctionClient
+from bc_auction.client import AuctionClient, FetchedPage
 from bc_auction.errors import ParserContractError, ScraperError
 from bc_auction.models import AuctionDetailRecord, SearchResultRecord
 from bc_auction.parsers import (
@@ -81,7 +81,43 @@ def _collect_search_records(
     keyword: str = "",
     display_order: str = "EndingFirst",
 ) -> _SearchCollection:
-    page = client.search_open_auctions(keyword=keyword, display_order=display_order)
+    search = client.prepare_open_auction_search()
+    records: list[SearchResultRecord] = []
+    records_by_source_id: dict[str, SearchResultRecord] = {}
+    records_by_canonical_url: dict[str, SearchResultRecord] = {}
+    pages_visited = 0
+
+    for product_group in search.product_groups:
+        if len(records) >= limit:
+            break
+        page = client.search_product_group(
+            search,
+            product_group,
+            keyword=keyword,
+            display_order=display_order,
+        )
+        group_collection = _collect_search_records_from_page(
+            client,
+            page,
+            limit - len(records),
+        )
+        pages_visited += group_collection.pages_visited
+        for record in group_collection.records:
+            _add_unique_search_record(
+                record,
+                records,
+                records_by_source_id,
+                records_by_canonical_url,
+            )
+
+    return _SearchCollection(records=tuple(records), pages_visited=pages_visited)
+
+
+def _collect_search_records_from_page(
+    client: AuctionClient,
+    page: FetchedPage,
+    limit: int,
+) -> _SearchCollection:
     tracker = SearchPageTracker()
     records: list[SearchResultRecord] = []
     visited_page_urls: set[str] = set()
@@ -119,6 +155,28 @@ def _collect_search_records(
         page = client.get(str(next_request_url))
 
     return _SearchCollection(records=tuple(records), pages_visited=pages_seen)
+
+
+def _add_unique_search_record(
+    record: SearchResultRecord,
+    records: list[SearchResultRecord],
+    records_by_source_id: dict[str, SearchResultRecord],
+    records_by_canonical_url: dict[str, SearchResultRecord],
+) -> None:
+    existing_source_id = records_by_source_id.get(record.source_id)
+    canonical_url = str(record.canonical_source_url)
+    existing_canonical_url = records_by_canonical_url.get(canonical_url)
+    if existing_source_id is not None and (
+        existing_source_id.canonical_source_url != record.canonical_source_url
+    ):
+        raise ParserContractError("product groups disagreed about a source ID's canonical URL")
+    if existing_canonical_url is not None and existing_canonical_url.source_id != record.source_id:
+        raise ParserContractError("product groups reused a canonical URL for different source IDs")
+    if existing_source_id is not None or existing_canonical_url is not None:
+        return
+    records.append(record)
+    records_by_source_id[record.source_id] = record
+    records_by_canonical_url[canonical_url] = record
 
 
 def scrape(
