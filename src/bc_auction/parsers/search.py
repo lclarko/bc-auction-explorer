@@ -160,7 +160,7 @@ def parse_product_groups(html: str) -> tuple[ProductGroup, ...]:
         if match is None:
             continue
         product_dis_id = match.group("id").strip()
-        description = " ".join(link.get_text(" ", strip=True).split())
+        description = re.sub(r"\\([\\&])", r"\1", match.group("description")).strip()
         if not product_dis_id or not description:
             raise ParserContractError("product-group link did not contain an ID and description")
         if product_dis_id in seen_ids:

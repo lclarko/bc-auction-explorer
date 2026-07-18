@@ -111,6 +111,18 @@ def test_parses_product_groups_and_builds_group_search_fields() -> None:
     assert group_fields["productDesc"] == "Antiques and Collectibles"
 
 
+def test_uses_product_group_description_from_the_submitted_source_value() -> None:
+    html = _fixture("search-entry.html").replace(
+        "Antiques and Collectibles</a>",
+        "Visible category label</a>",
+        1,
+    )
+
+    product_groups = parse_product_groups(html)
+
+    assert product_groups[0] == ProductGroup("5810716", "Antiques and Collectibles")
+
+
 def test_rejects_a_search_form_that_is_not_posted() -> None:
     html = '<form action="submitDocSearch" method="get"></form>'
 

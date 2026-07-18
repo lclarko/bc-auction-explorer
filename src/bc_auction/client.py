@@ -61,7 +61,6 @@ class SourceRequestMetrics:
 
 @dataclass(frozen=True, slots=True)
 class OpenAuctionSearch:
-    form: SearchForm
     product_groups: tuple[ProductGroup, ...]
 
 
@@ -110,6 +109,7 @@ class AuctionClient:
         self._request_duration_ms = 0
         self._request_wait_duration_ms = 0
         self._retry_wait_duration_ms = 0
+        self._search_form: SearchForm | None = None
         self._client = httpx.Client(
             follow_redirects=False,
             timeout=timeout,
@@ -162,10 +162,11 @@ class AuctionClient:
         keyword: str = "",
         display_order: str = "EndingFirst",
     ) -> FetchedPage:
-        search = self.prepare_open_auction_search()
+        self.prepare_open_auction_search()
+        search_form = self._require_search_form()
         return self.post_form(
-            search.form.action_url,
-            search.form.open_auction_fields(keyword=keyword, display_order=display_order),
+            search_form.action_url,
+            search_form.open_auction_fields(keyword=keyword, display_order=display_order),
         )
 
     def prepare_open_auction_search(self) -> OpenAuctionSearch:
@@ -180,24 +181,30 @@ class AuctionClient:
         search_form = parse_search_form(browse_page.decode().text, browse_page.url)
         self._set_session_cookie(search_form.session_id, browse_page.url)
         product_groups = parse_product_groups(browse_page.decode().text)
-        return OpenAuctionSearch(form=search_form, product_groups=product_groups)
+        self._search_form = search_form
+        return OpenAuctionSearch(product_groups=product_groups)
 
     def search_product_group(
         self,
-        search: OpenAuctionSearch,
         product_group: ProductGroup,
         *,
         keyword: str = "",
         display_order: str = "EndingFirst",
     ) -> FetchedPage:
+        search_form = self._require_search_form()
         return self.post_form(
-            search.form.action_url,
-            search.form.product_group_fields(
+            search_form.action_url,
+            search_form.product_group_fields(
                 product_group,
                 keyword=keyword,
                 display_order=display_order,
             ),
         )
+
+    def _require_search_form(self) -> SearchForm:
+        if self._search_form is None:
+            raise RuntimeError("auction search must be prepared before it is submitted")
+        return self._search_form
 
     def get_item_detail(self, path_or_url: str) -> FetchedPage:
         detail_frame_page = self.get(path_or_url)

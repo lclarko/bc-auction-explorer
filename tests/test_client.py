@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 import bc_auction.client as client_module
-from bc_auction.client import AuctionClient
+from bc_auction.client import AuctionClient, OpenAuctionSearch
 from bc_auction.errors import ResponseContractError
 
 _FIXTURES = Path(__file__).parent / "fixtures"
@@ -29,6 +29,10 @@ def test_client_keeps_raw_body_and_content_type() -> None:
         page = client.get("/open.dll/welcome")
 
     assert page.decode().text == "Café"
+
+
+def test_prepared_search_exposes_only_public_product_groups() -> None:
+    assert tuple(OpenAuctionSearch.__dataclass_fields__) == ("product_groups",)
 
 
 def test_client_records_aggregate_retry_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
