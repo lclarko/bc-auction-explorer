@@ -333,6 +333,7 @@ class AuctionRepository:
         run_id: UUID,
         record: PersistedAuctionRecord,
     ) -> PersistResult:
+        record = PersistedAuctionRecord.model_validate(record.model_dump())
         try:
             with self._engine.begin() as connection:
                 return self._persist_record(connection, run_id, record)

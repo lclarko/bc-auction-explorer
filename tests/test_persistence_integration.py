@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from pydantic import ValidationError
 from sqlalchemy import inspect, select, update
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
@@ -482,6 +483,47 @@ def test_same_source_id_can_remap_to_a_new_public_document_and_preserve_history(
     assert len(observations) == 1
 
 
+def test_repository_revalidates_session_free_trusted_remap_urls(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    initial = convert_reconciled_record(
+        _detail(),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, initial)
+
+    session_bearing_remap = initial.model_copy(
+        update={
+            "source_dis_id": "8734000",
+            "canonical_source_url": (
+                "https://www.bcauction.ca/open.dll/showDisplayDocument?"
+                "disID=8734000&sessionID=private"
+            ),
+        }
+    )
+    external_remap = initial.model_copy(
+        update={
+            "source_dis_id": "8734001",
+            "canonical_source_url": "https://example.com/open.dll/showDisplayDocument?disID=8734001",
+        }
+    )
+
+    with pytest.raises(ValidationError, match="session-free"):
+        repository.persist_reconciled_record(run_id, session_bearing_remap)
+    with pytest.raises(ValidationError, match="BC Auction HTTPS host"):
+        repository.persist_reconciled_record(run_id, external_remap)
+
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
+    assert item["source_dis_id"] == "8733643"
+    assert item["canonical_source_url"] == (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643"
+    )
+    assert len(observations) == 1
+
+
 def test_document_remap_does_not_reopen_a_terminal_item(
     repository: AuctionRepository,
 ) -> None:
@@ -503,11 +545,17 @@ def test_document_remap_does_not_reopen_a_terminal_item(
     result = repository.persist_reconciled_record(run_id, remapped_open)
 
     assert result.updated is True
+    assert result.observation_created is True
     with repository._engine.connect() as connection:
         item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
     assert item["status"] == AuctionStatus.CLOSED.value
     assert item["source_dis_id"] == "8734000"
+    assert item["canonical_source_url"] == (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8734000"
+    )
     assert item["last_changed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
+    assert len(observations) == 2
 
 
 def test_scrape_run_lifecycle_is_enforced(repository: AuctionRepository) -> None:
