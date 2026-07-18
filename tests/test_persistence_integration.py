@@ -586,6 +586,7 @@ def test_document_remap_does_not_reopen_a_terminal_item(
     )
     assert item["first_seen_at"] == datetime(2026, 7, 15, tzinfo=UTC)
     assert item["closed_at"] == datetime(2026, 7, 15, tzinfo=UTC)
+    assert item["last_seen_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
     assert item["last_changed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
     assert len(observations) == 2
 
