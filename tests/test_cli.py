@@ -491,20 +491,25 @@ def test_terminal_progress_is_interactive_and_never_receives_source_urls() -> No
     progress = cli._create_progress_reporter(stream)
 
     assert progress is not None
-    progress.start_search()
-    progress.start_search_groups(2)
-    progress.advance_search_group(unique_listings=10, pages_visited=1)
-    progress.finish_search(unique_listings=10, pages_visited=1)
-    progress.start_details(10)
-    progress.advance_detail(failures=0)
-    progress.finish_details(successful=10, failures=0)
+    outcome = cli._scrape_with_outcome(_TwoRecordClient(), 2, progress=progress)
+    repository = _FakePersistenceRepository()
+    results, failures = cli._persist_records(
+        repository,
+        repository.run_id,
+        outcome.records,
+        progress=progress,
+    )
     progress.close()
 
+    assert len(results) == 2
+    assert failures == []
     rendered = stream.getvalue()
     assert "Preparing public auction search" in rendered
     assert "Enumerating product groups" in rendered
     assert "Fetching listing details" in rendered
+    assert "Saving listing observations" in rendered
     assert "sessionID" not in rendered
+    assert "SESSION_ID" not in rendered
     assert "showDisplayDocument" not in rendered
 
 
