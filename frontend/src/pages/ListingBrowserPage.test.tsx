@@ -185,6 +185,15 @@ describe("ListingBrowserPage", () => {
     );
     expect(detailLink.getAttribute("href")).not.toContain("sessionID");
     expect(detailLink.getAttribute("href")).not.toContain("private");
+
+    await waitFor(() => {
+      expect(locationRequestUrls).not.toHaveLength(0);
+      expect(categoryRequestUrls).not.toHaveLength(0);
+    });
+    for (const url of [...listingRequestUrls, ...locationRequestUrls, ...categoryRequestUrls]) {
+      expect(url.toString()).not.toContain("sessionID");
+      expect(url.toString()).not.toContain("private");
+    }
   });
 
   it("applies Show through the form, resets the page, and scopes facet requests", async () => {
@@ -377,7 +386,7 @@ describe("ListingBrowserPage", () => {
 
     setVisibility("visible");
     await act(async () => {
-      window.dispatchEvent(new Event("focus"));
+      document.dispatchEvent(new Event("visibilitychange"));
       await Promise.resolve();
     });
 
