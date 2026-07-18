@@ -62,12 +62,12 @@ const facetsByView = {
     locations: [{ value: "Victoria", count: 1 }],
   },
   all: {
-    categories: [{ value: "Mixed lots", count: 3 }],
-    locations: [{ value: "Kelowna", count: 3 }],
+    categories: [{ value: "Office", count: 2 }],
+    locations: [{ value: "Victoria", count: 2 }],
   },
   ended: {
-    categories: [{ value: "Estate", count: 2 }],
-    locations: [{ value: "Nanaimo", count: 2 }],
+    categories: [{ value: "Office", count: 1 }],
+    locations: [{ value: "Victoria", count: 1 }],
   },
 };
 
@@ -261,8 +261,8 @@ describe("ListingBrowserPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Browse ended auction listings" }),
     ).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Nanaimo (2)" })).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Estate (2)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Victoria (1)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Office (1)" })).toBeInTheDocument();
   });
 
   it("uses the ended default sort without adding it to the URL", async () => {
@@ -286,8 +286,8 @@ describe("ListingBrowserPage", () => {
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
     expect(screen.getByText("2 listings")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Passed closing office chair" })).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Kelowna (3)" })).toBeInTheDocument();
-    expect(await screen.findByRole("option", { name: "Mixed lots (3)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Victoria (2)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Office (2)" })).toBeInTheDocument();
   });
 
   it.each([
