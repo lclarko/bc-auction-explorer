@@ -76,8 +76,9 @@ function listingPath(sourceId: string, search: string): string {
 
 export function ListingBrowserPage() {
   const [searchParameters, setSearchParameters] = useSearchParams();
-  const searchParameterString = searchParameters.toString();
+  const rawSearchParameterString = searchParameters.toString();
   const search = parseListingSearch(searchParameters);
+  const canonicalSearchParameterString = listingSearchParams(search).toString();
   const currentView = viewContent[search.view];
   const [draft, setDraft] = useState<ListingSearch>(search);
   const [formError, setFormError] = useState<string | null>(null);
@@ -92,7 +93,7 @@ export function ListingBrowserPage() {
     resultsNeedRefreshRef.current = false;
     setResultsNeedRefresh(false);
     lastVisibleLifecycleCheck.current = Date.now();
-  }, [currentView.heading, searchParameterString]);
+  }, [currentView.heading, rawSearchParameterString]);
 
   const listings = useQuery({
     queryKey: ["listings", search],
@@ -115,11 +116,10 @@ export function ListingBrowserPage() {
   };
 
   useEffect(() => {
-    const canonicalParameters = listingSearchParams(search);
-    if (searchParameterString !== canonicalParameters.toString()) {
-      setSearchParameters(canonicalParameters, { replace: true });
+    if (rawSearchParameterString !== canonicalSearchParameterString) {
+      setSearchParameters(canonicalSearchParameterString, { replace: true });
     }
-  }, [search, searchParameterString, setSearchParameters]);
+  }, [canonicalSearchParameterString, rawSearchParameterString, setSearchParameters]);
 
   useEffect(() => {
     if (listings.isPlaceholderData || !listings.data) {
@@ -414,7 +414,7 @@ export function ListingBrowserPage() {
                       listing.availability,
                       listing.status,
                       listing.closing_at,
-                      listing.observed_at,
+                      listing.last_seen_at,
                       now,
                     )
                   : null;
@@ -425,7 +425,7 @@ export function ListingBrowserPage() {
                       <div className="listing-card__main">
                         <div className="listing-card__heading">
                           <h2>
-                            <Link to={listingPath(listing.source_id, searchParameterString)}>
+                            <Link to={listingPath(listing.source_id, canonicalSearchParameterString)}>
                               {listing.title}
                             </Link>
                           </h2>
@@ -457,7 +457,7 @@ export function ListingBrowserPage() {
                         </dl>
                         {lifecycleText ? <p className="closing-passed">{lifecycleText}</p> : null}
                         <div className="listing-links">
-                          <Link to={listingPath(listing.source_id, searchParameterString)}>View details</Link>
+                          <Link to={listingPath(listing.source_id, canonicalSearchParameterString)}>View details</Link>
                           <a href={listing.canonical_source_url}>View source listing</a>
                         </div>
                       </div>

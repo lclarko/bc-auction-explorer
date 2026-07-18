@@ -69,7 +69,7 @@ export function ListingDetailPage() {
   const rawLocation =
     item.location_normalization_status === "unknown" && item.location_raw ? item.location_raw : null;
   const lifecycleText = item.availability
-    ? listingLifecycleText(item.availability, item.status, item.closing_at, item.observed_at, now)
+    ? listingLifecycleText(item.availability, item.status, item.closing_at, item.last_seen_at, now)
     : null;
 
   return (

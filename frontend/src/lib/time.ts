@@ -63,8 +63,18 @@ function relativeDuration(milliseconds: number): string {
     return `${totalMinutes} ${totalMinutes === 1 ? "minute" : "minutes"}`;
   }
   if (totalMinutes >= 24 * 60) {
-    const days = Math.ceil(totalMinutes / (24 * 60));
-    return `${days} ${days === 1 ? "day" : "days"}`;
+    const days = Math.floor(totalMinutes / (24 * 60));
+    const remainderMinutes = totalMinutes % (24 * 60);
+    const hours = Math.floor(remainderMinutes / 60);
+    const minutes = remainderMinutes % 60;
+    const parts = [`${days} ${days === 1 ? "day" : "days"}`];
+    if (hours) {
+      parts.push(`${hours} ${hours === 1 ? "hour" : "hours"}`);
+    }
+    if (minutes) {
+      parts.push(`${minutes} ${minutes === 1 ? "minute" : "minutes"}`);
+    }
+    return parts.join(" ");
   }
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -80,7 +90,7 @@ export function listingLifecycleText(
   availability: ListingAvailability,
   sourceStatus: AuctionStatus,
   closingAt: string | null | undefined,
-  observedAt: string | null | undefined,
+  lastSeenAt: string | null | undefined,
   now = Date.now(),
 ): string | null {
   const closingDate = parsedDate(closingAt);
@@ -92,8 +102,8 @@ export function listingLifecycleText(
     const passedText = closingDate
       ? `Scheduled closing time passed ${relativeDuration(now - closingDate.getTime())} ago.`
       : "Scheduled closing time passed.";
-    return observedAt
-      ? `${passedText} Last observed open at ${pacificDateTime(observedAt)}.`
+    return lastSeenAt
+      ? `${passedText} Last observed open at ${pacificDateTime(lastSeenAt)}.`
       : passedText;
   }
 

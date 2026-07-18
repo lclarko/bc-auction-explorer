@@ -147,6 +147,18 @@ describe("ListingBrowserPage", () => {
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
   });
 
+  it("uses canonical search state in detail links", async () => {
+    renderPage("/?keyword=chair&sessionID=private");
+
+    const detailLink = await screen.findByRole("link", { name: "View details" });
+    expect(detailLink).toHaveAttribute(
+      "href",
+      "/listings/ABC-123?from=keyword%3Dchair",
+    );
+    expect(detailLink.getAttribute("href")).not.toContain("sessionID");
+    expect(detailLink.getAttribute("href")).not.toContain("private");
+  });
+
   it("applies Show through the form, resets the page, and scopes facet requests", async () => {
     const user = userEvent.setup();
     renderPage("/?page=2&sort=price_high");
@@ -267,6 +279,14 @@ describe("ListingBrowserPage", () => {
     const listingsBeforeFocus = listingRequestUrls.length;
     const locationsBeforeFocus = locationRequestUrls.length;
     const categoriesBeforeFocus = categoryRequestUrls.length;
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(listingRequestUrls).toHaveLength(listingsBeforeFocus);
+    expect(locationRequestUrls).toHaveLength(locationsBeforeFocus);
+    expect(categoryRequestUrls).toHaveLength(categoriesBeforeFocus);
 
     setVisibility("hidden");
     await act(async () => {
