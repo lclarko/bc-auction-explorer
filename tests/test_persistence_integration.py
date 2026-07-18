@@ -584,6 +584,8 @@ def test_document_remap_does_not_reopen_a_terminal_item(
     assert item["canonical_source_url"] == (
         "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8734000"
     )
+    assert item["first_seen_at"] == datetime(2026, 7, 15, tzinfo=UTC)
+    assert item["closed_at"] == datetime(2026, 7, 15, tzinfo=UTC)
     assert item["last_changed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
     assert len(observations) == 2
 
