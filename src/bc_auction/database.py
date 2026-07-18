@@ -34,6 +34,16 @@ scrape_runs = Table(
     Column("requested_limit", Integer, nullable=False),
     Column("keyword", Text, nullable=False),
     Column("sort", String(64), nullable=False),
+    Column("completion_status", String(16), nullable=False, server_default="pending"),
+    Column("expected_product_groups", Integer, nullable=False, server_default="0"),
+    Column("processed_product_groups", Integer, nullable=False, server_default="0"),
+    Column("unique_listings_enumerated", Integer, nullable=False, server_default="0"),
+    Column("duplicate_listings_enumerated", Integer, nullable=False, server_default="0"),
+    Column("detail_attempted", Integer, nullable=False, server_default="0"),
+    Column("detail_succeeded", Integer, nullable=False, server_default="0"),
+    Column("persistence_succeeded", Integer, nullable=False, server_default="0"),
+    Column("persistence_failures", Integer, nullable=False, server_default="0"),
+    Column("enumeration_complete", Integer, nullable=False, server_default="0"),
     Column("pages_visited", Integer, nullable=False, server_default="0"),
     Column("items_seen", Integer, nullable=False, server_default="0"),
     Column("items_created", Integer, nullable=False, server_default="0"),
@@ -52,6 +62,10 @@ scrape_runs = Table(
     Column("error_summary", Text),
     Column("created_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('running', 'succeeded', 'partial', 'failed')"),
+    CheckConstraint(
+        "completion_status IN ('pending', 'complete', 'incomplete')",
+        name="ck_scrape_runs_completion_status",
+    ),
     CheckConstraint(
         "(status = 'running' AND finished_at IS NULL) OR "
         "(status IN ('succeeded', 'partial', 'failed') AND finished_at IS NOT NULL)",
@@ -105,11 +119,21 @@ auction_items = Table(
     Column("last_seen_at", DateTime(timezone=True), nullable=False),
     Column("last_changed_at", DateTime(timezone=True), nullable=False),
     Column("closed_at", DateTime(timezone=True)),
+    Column("last_complete_seen_at", DateTime(timezone=True)),
+    Column("complete_absence_count", Integer, nullable=False, server_default="0"),
+    Column("inventory_state", String(16), nullable=False, server_default="current"),
+    Column("first_absent_at", DateTime(timezone=True)),
+    Column("stale_at", DateTime(timezone=True)),
     Column("metadata_hash", String(64), nullable=False),
     Column("current_observation_hash", String(64), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     CheckConstraint("status IN ('open', 'closed', 'withdrawn', 'unknown')"),
+    CheckConstraint("complete_absence_count >= 0", name="ck_auction_items_absences_nonnegative"),
+    CheckConstraint(
+        "inventory_state IN ('current', 'not_observed', 'stale')",
+        name="ck_auction_items_inventory_state",
+    ),
     CheckConstraint(
         "location_normalization_status IS NULL OR "
         "location_normalization_status IN ('exact', 'alias', 'unknown')"
