@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ListingBrowserPage } from "./ListingBrowserPage";
@@ -12,9 +12,15 @@ function renderPage(initialEntry = "/"): void {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <ListingBrowserPage />
+        <RouterLocation />
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function RouterLocation() {
+  const location = useLocation();
+  return <output data-testid="router-location">{location.search}</output>;
 }
 
 const listing = {
@@ -50,6 +56,25 @@ const secondActiveListing = {
   title: "Second active listing",
 };
 
+const facetsByView = {
+  active: {
+    categories: [{ value: "Office", count: 1 }],
+    locations: [{ value: "Victoria", count: 1 }],
+  },
+  all: {
+    categories: [{ value: "Mixed lots", count: 3 }],
+    locations: [{ value: "Kelowna", count: 3 }],
+  },
+  ended: {
+    categories: [{ value: "Estate", count: 2 }],
+    locations: [{ value: "Nanaimo", count: 2 }],
+  },
+};
+
+function facetsForView(view: string | null) {
+  return view === "ended" ? facetsByView.ended : view === "all" ? facetsByView.all : facetsByView.active;
+}
+
 let activeListing = listing;
 let additionalActiveListings: Array<typeof listing> = [];
 let listingRequestUrls: URL[] = [];
@@ -61,6 +86,17 @@ let pendingInitialListingsResponse: ((response: Response) => void) | undefined;
 
 function setVisibility(visibilityState: DocumentVisibilityState): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: visibilityState });
+}
+
+function activeListingBeforeClosing(): typeof listing {
+  return {
+    ...listing,
+    closing_at: "2026-07-15T19:01:00Z",
+    first_seen_at: "2026-07-15T18:00:00Z",
+    last_changed_at: "2026-07-15T18:00:00Z",
+    last_seen_at: "2026-07-15T18:00:00Z",
+    observed_at: "2026-07-15T18:00:00Z",
+  };
 }
 
 beforeEach(() => {
@@ -120,16 +156,18 @@ beforeEach(() => {
       }
       if (url.pathname === "/api/locations") {
         locationRequestUrls.push(url);
+        const facets = facetsForView(url.searchParams.get("view"));
         return Promise.resolve(
-          new Response(JSON.stringify({ items: [{ value: "Victoria", count: 1 }] }), {
+          new Response(JSON.stringify({ items: facets.locations }), {
             headers: { "Content-Type": "application/json" },
           }),
         );
       }
       if (url.pathname === "/api/categories") {
         categoryRequestUrls.push(url);
+        const facets = facetsForView(url.searchParams.get("view"));
         return Promise.resolve(
-          new Response(JSON.stringify({ items: [{ value: "Office", count: 1 }] }), {
+          new Response(JSON.stringify({ items: facets.categories }), {
             headers: { "Content-Type": "application/json" },
           }),
         );
@@ -159,6 +197,8 @@ describe("ListingBrowserPage", () => {
     expect(screen.getByText("$0.00")).toBeInTheDocument();
     expect(screen.getByText("0 bids")).toBeInTheDocument();
     expect(listingRequestUrls.at(-1)?.searchParams.get("view")).toBe("active");
+    expect(await screen.findByRole("option", { name: "Victoria (1)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Office (1)" })).toBeInTheDocument();
   });
 
   it("applies a keyword through the existing filter form", async () => {
@@ -221,6 +261,8 @@ describe("ListingBrowserPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Browse ended auction listings" }),
     ).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Nanaimo (2)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Estate (2)" })).toBeInTheDocument();
   });
 
   it("uses the ended default sort without adding it to the URL", async () => {
@@ -232,6 +274,9 @@ describe("ListingBrowserPage", () => {
 
     await waitFor(() => {
       expect(listingRequestUrls.at(-1)?.searchParams.get("sort")).toBe("closing_latest");
+      expect(
+        new URLSearchParams(screen.getByTestId("router-location").textContent ?? "").has("sort"),
+      ).toBe(false);
     });
   });
 
@@ -241,6 +286,8 @@ describe("ListingBrowserPage", () => {
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
     expect(screen.getByText("2 listings")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Passed closing office chair" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Kelowna (3)" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Mixed lots (3)" })).toBeInTheDocument();
   });
 
   it.each([
@@ -299,7 +346,7 @@ describe("ListingBrowserPage", () => {
   it("keeps an active card stable and offers a refresh after its closing boundary", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-07-15T19:00:00Z"));
-    activeListing = { ...listing, closing_at: "2026-07-15T19:01:00Z" };
+    activeListing = activeListingBeforeClosing();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderPage();
 
@@ -331,7 +378,7 @@ describe("ListingBrowserPage", () => {
   it("detects a closing boundary when initial listings arrive after the minute tick", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-07-15T19:00:00Z"));
-    activeListing = { ...listing, closing_at: "2026-07-15T19:01:00Z" };
+    activeListing = activeListingBeforeClosing();
     delayInitialListingsResponse = true;
     renderPage();
 
@@ -362,7 +409,7 @@ describe("ListingBrowserPage", () => {
   it("refetches listings and view-scoped facets on focus only after a hidden active item crosses", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date("2026-07-15T19:00:00Z"));
-    activeListing = { ...listing, closing_at: "2026-07-15T19:01:00Z" };
+    activeListing = activeListingBeforeClosing();
     renderPage();
 
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
