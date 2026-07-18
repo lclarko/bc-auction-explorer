@@ -7,7 +7,7 @@ from enum import StrEnum
 from typing import TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import Connection, Engine, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError
@@ -160,11 +160,41 @@ def convert_reconciled_record(
         "status": record.status,
         "observed_at": observed_at,
     }
+    return _persisted_record(data)
+
+
+def _persisted_record(data: _PersistenceInput) -> PersistedAuctionRecord:
     return PersistedAuctionRecord(
         **data,
         metadata_hash=metadata_hash(data),
         observation_hash=observation_hash(data),
     )
+
+
+def _persistence_input_from_record(record: PersistedAuctionRecord) -> _PersistenceInput:
+    return {
+        "source_id": record.source_id,
+        "source_dis_id": record.source_dis_id,
+        "canonical_source_url": record.canonical_source_url,
+        "title": record.title,
+        "description": record.description,
+        "category_raw": record.category_raw,
+        "category_canonical": record.category_canonical,
+        "location_raw": record.location_raw,
+        "location_canonical": record.location_canonical,
+        "location_qualifier": record.location_qualifier,
+        "location_normalization_status": record.location_normalization_status,
+        "pickup_details": record.pickup_details,
+        "image_urls": record.image_urls,
+        "current_bid": record.current_bid,
+        "minimum_bid": record.minimum_bid,
+        "starting_bid": record.starting_bid,
+        "bid_count": record.bid_count,
+        "closing_at": record.closing_at,
+        "status_raw": record.status_raw,
+        "status": record.status,
+        "observed_at": record.observed_at,
+    }
 
 
 def metadata_hash(data: _PersistenceInput) -> str:
@@ -334,6 +364,11 @@ class AuctionRepository:
         record: PersistedAuctionRecord,
     ) -> PersistResult:
         try:
+            record = PersistedAuctionRecord.model_validate(record.model_dump())
+            record = _persisted_record(_persistence_input_from_record(record))
+        except ValidationError:
+            raise PersistenceError("persistence record failed validation") from None
+        try:
             with self._engine.begin() as connection:
                 return self._persist_record(connection, run_id, record)
         except IntegrityError as exc:
@@ -384,11 +419,11 @@ class AuctionRepository:
             )
 
         item_id = existing["id"]
-        if (
+        # BC Auction can revise a public display document while retaining its auction number.
+        identity_changed = (
             existing["source_dis_id"] != record.source_dis_id
             or existing["canonical_source_url"] != record.canonical_source_url
-        ):
-            raise IdentityConflictError("source ID changed canonical auction identity")
+        )
         if record.observed_at < existing["last_seen_at"]:
             observation_created = self._insert_stale_observation_if_new(
                 connection,
@@ -411,11 +446,17 @@ class AuctionRepository:
             connection.execute(
                 update(auction_items)
                 .where(auction_items.c.id == item_id)
-                .values(last_seen_at=now, updated_at=now)
+                .values(
+                    source_dis_id=record.source_dis_id,
+                    canonical_source_url=record.canonical_source_url,
+                    last_seen_at=now,
+                    last_changed_at=now if identity_changed else existing["last_changed_at"],
+                    updated_at=now,
+                )
             )
             return PersistResult(
                 created=False,
-                updated=False,
+                updated=identity_changed,
                 observation_created=observation_created,
             )
         metadata_changed = existing["metadata_hash"] != record.metadata_hash
@@ -431,7 +472,12 @@ class AuctionRepository:
                 last_seen_at=now,
                 last_changed_at=(
                     now
-                    if metadata_changed or observation_changed or closed_at_changed
+                    if (
+                        identity_changed
+                        or metadata_changed
+                        or observation_changed
+                        or closed_at_changed
+                    )
                     else existing["last_changed_at"]
                 ),
                 closed_at=closed_at,
@@ -446,7 +492,9 @@ class AuctionRepository:
         self._record_location_alias(connection, record)
         return PersistResult(
             created=False,
-            updated=metadata_changed or observation_changed or closed_at_changed,
+            updated=(
+                identity_changed or metadata_changed or observation_changed or closed_at_changed
+            ),
             observation_created=observation_created,
         )
 

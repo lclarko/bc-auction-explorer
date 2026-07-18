@@ -18,6 +18,7 @@ from bc_auction.models import AuctionDetailRecord, AuctionStatus
 from bc_auction.persistence import (
     AuctionRepository,
     IdentityConflictError,
+    PersistenceError,
     ScrapeRunCounts,
     ScrapeRunInput,
     ScrapeRunMetrics,
@@ -404,7 +405,7 @@ def test_terminal_snapshot_is_not_reopened_by_a_newer_nonterminal_observation(
     assert len(observations) == 2
 
 
-def test_closed_listings_remain_queryable_and_identity_collisions_fail(
+def test_closed_listings_remain_queryable_and_cross_listing_identity_collisions_fail(
     repository: AuctionRepository,
 ) -> None:
     run_id = _run(repository)
@@ -439,7 +440,20 @@ def test_closed_listings_remain_queryable_and_identity_collisions_fail(
     with pytest.raises(IdentityConflictError):
         repository.persist_reconciled_record(run_id, conflicting)
 
-    changed_identity = convert_reconciled_record(
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+    assert item["source_dis_id"] == "8733643"
+
+
+def test_same_source_id_can_remap_to_a_new_public_document_and_preserve_history(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    initial = convert_reconciled_record(
+        _detail(),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    remapped = convert_reconciled_record(
         _detail(
             canonical_source_url=(
                 "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8734000"
@@ -447,12 +461,134 @@ def test_closed_listings_remain_queryable_and_identity_collisions_fail(
         ),
         observed_at=datetime(2026, 7, 15, 2, tzinfo=UTC),
     )
-    with pytest.raises(IdentityConflictError, match="changed canonical"):
-        repository.persist_reconciled_record(run_id, changed_identity)
+
+    assert repository.persist_reconciled_record(run_id, initial).created is True
+    result = repository.persist_reconciled_record(run_id, remapped)
+
+    assert result.created is False
+    assert result.updated is True
+    assert result.observation_created is False
 
     with repository._engine.connect() as connection:
         item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
+    assert item["source_id"] == "A000001"
+    assert item["source_dis_id"] == "8734000"
+    assert item["canonical_source_url"] == (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8734000"
+    )
+    assert item["first_seen_at"] == datetime(2026, 7, 15, tzinfo=UTC)
+    assert item["last_seen_at"] == datetime(2026, 7, 15, 2, tzinfo=UTC)
+    assert item["last_changed_at"] == datetime(2026, 7, 15, 2, tzinfo=UTC)
+    assert len(observations) == 1
+
+
+def test_repository_revalidates_session_free_trusted_remap_urls(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    initial = convert_reconciled_record(
+        _detail(),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(run_id, initial)
+
+    session_bearing_remap = initial.model_copy(
+        update={
+            "source_dis_id": "8734000",
+            "canonical_source_url": (
+                "https://www.bcauction.ca/open.dll/showDisplayDocument?"
+                "disID=8734000&sessionID=private"
+            ),
+        }
+    )
+    external_remap = initial.model_copy(
+        update={
+            "source_dis_id": "8734001",
+            "canonical_source_url": "https://example.com/open.dll/showDisplayDocument?disID=8734001",
+        }
+    )
+
+    with pytest.raises(PersistenceError, match="failed validation") as session_error:
+        repository.persist_reconciled_record(run_id, session_bearing_remap)
+    assert "sessionID" not in str(session_error.value)
+    assert "private" not in str(session_error.value)
+    with pytest.raises(PersistenceError, match="failed validation"):
+        repository.persist_reconciled_record(run_id, external_remap)
+
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
     assert item["source_dis_id"] == "8733643"
+    assert item["canonical_source_url"] == (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733643"
+    )
+    assert len(observations) == 1
+
+
+def test_repository_recomputes_hashes_for_a_copied_record(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    initial = convert_reconciled_record(
+        _detail(),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    copied_with_changed_fields = initial.model_copy(
+        update={
+            "title": "Updated utility vehicle",
+            "current_bid": Decimal("30.00"),
+            "observed_at": datetime(2026, 7, 15, 1, tzinfo=UTC),
+        }
+    )
+
+    repository.persist_reconciled_record(run_id, initial)
+    result = repository.persist_reconciled_record(run_id, copied_with_changed_fields)
+
+    assert result.updated is True
+    assert result.observation_created is True
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
+    assert item["title"] == "Updated utility vehicle"
+    assert len(observations) == 2
+
+
+def test_document_remap_does_not_reopen_a_terminal_item(
+    repository: AuctionRepository,
+) -> None:
+    run_id = _run(repository)
+    closed = convert_reconciled_record(
+        _detail(status=AuctionStatus.CLOSED, status_raw="Closed"),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    remapped_open = convert_reconciled_record(
+        _detail(
+            canonical_source_url=(
+                "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8734000"
+            )
+        ),
+        observed_at=datetime(2026, 7, 15, 1, tzinfo=UTC),
+    )
+
+    repository.persist_reconciled_record(run_id, closed)
+    result = repository.persist_reconciled_record(run_id, remapped_open)
+
+    assert result.updated is True
+    assert result.observation_created is True
+    with repository._engine.connect() as connection:
+        item = connection.execute(select(auction_items)).mappings().one()
+        observations = connection.execute(select(item_observations)).all()
+    assert item["status"] == AuctionStatus.CLOSED.value
+    assert item["source_dis_id"] == "8734000"
+    assert item["canonical_source_url"] == (
+        "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8734000"
+    )
+    assert item["first_seen_at"] == datetime(2026, 7, 15, tzinfo=UTC)
+    assert item["closed_at"] == datetime(2026, 7, 15, tzinfo=UTC)
+    assert item["last_seen_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
+    assert item["last_changed_at"] == datetime(2026, 7, 15, 1, tzinfo=UTC)
+    assert len(observations) == 2
 
 
 def test_scrape_run_lifecycle_is_enforced(repository: AuctionRepository) -> None:
