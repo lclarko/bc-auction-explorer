@@ -6,7 +6,7 @@ import os
 import re
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,7 +15,7 @@ from uuid import UUID
 
 import httpx
 
-from bc_auction.client import AuctionClient
+from bc_auction.client import AuctionClient, FetchedPage
 from bc_auction.errors import ParserContractError, ScraperError
 from bc_auction.models import AuctionDetailRecord, SearchResultRecord
 from bc_auction.parsers import (
@@ -81,7 +81,46 @@ def _collect_search_records(
     keyword: str = "",
     display_order: str = "EndingFirst",
 ) -> _SearchCollection:
-    page = client.search_open_auctions(keyword=keyword, display_order=display_order)
+    search = client.prepare_open_auction_search()
+    records: list[SearchResultRecord] = []
+    records_by_source_id: dict[str, SearchResultRecord] = {}
+    records_by_canonical_url: dict[str, SearchResultRecord] = {}
+    pages_visited = 0
+
+    def add_search_record(record: SearchResultRecord) -> bool:
+        _add_unique_search_record(
+            record,
+            records,
+            records_by_source_id,
+            records_by_canonical_url,
+        )
+        return len(records) >= limit
+
+    for product_group in search.product_groups:
+        if len(records) >= limit:
+            break
+        page = client.search_product_group(
+            product_group,
+            keyword=keyword,
+            display_order=display_order,
+        )
+        group_collection = _collect_search_records_from_page(
+            client,
+            page,
+            on_record=add_search_record,
+        )
+        pages_visited += group_collection.pages_visited
+
+    return _SearchCollection(records=tuple(records[:limit]), pages_visited=pages_visited)
+
+
+def _collect_search_records_from_page(
+    client: AuctionClient,
+    page: FetchedPage,
+    limit: int | None = None,
+    *,
+    on_record: Callable[[SearchResultRecord], bool] | None = None,
+) -> _SearchCollection:
     tracker = SearchPageTracker()
     records: list[SearchResultRecord] = []
     visited_page_urls: set[str] = set()
@@ -89,7 +128,7 @@ def _collect_search_records(
     previous_page_number: int | None = None
     previous_record_end: int | None = None
 
-    while len(records) < limit:
+    while limit is None or len(records) < limit:
         if pages_seen >= _MAX_SEARCH_PAGES:
             raise ParserContractError("search results exceeded the maximum page limit")
         if page.url in visited_page_urls:
@@ -107,9 +146,14 @@ def _collect_search_records(
             previous_page_number = pagination.current_page
             previous_record_end = pagination.record_end
         tracker.add(results_page)
-        records.extend(results_page.records[: limit - len(records)])
+        for record in results_page.records:
+            if limit is not None and len(records) >= limit:
+                break
+            records.append(record)
+            if on_record is not None and on_record(record):
+                return _SearchCollection(records=tuple(records), pages_visited=pages_seen)
 
-        if len(records) == limit or pagination is None:
+        if (limit is not None and len(records) == limit) or pagination is None:
             break
         next_request_url = pagination.next_request_url
         if next_request_url is None:
@@ -119,6 +163,28 @@ def _collect_search_records(
         page = client.get(str(next_request_url))
 
     return _SearchCollection(records=tuple(records), pages_visited=pages_seen)
+
+
+def _add_unique_search_record(
+    record: SearchResultRecord,
+    records: list[SearchResultRecord],
+    records_by_source_id: dict[str, SearchResultRecord],
+    records_by_canonical_url: dict[str, SearchResultRecord],
+) -> None:
+    existing_source_id = records_by_source_id.get(record.source_id)
+    canonical_url = str(record.canonical_source_url)
+    existing_canonical_url = records_by_canonical_url.get(canonical_url)
+    if existing_source_id is not None and (
+        existing_source_id.canonical_source_url != record.canonical_source_url
+    ):
+        raise ParserContractError("product groups disagreed about a source ID's canonical URL")
+    if existing_canonical_url is not None and existing_canonical_url.source_id != record.source_id:
+        raise ParserContractError("product groups reused a canonical URL for different source IDs")
+    if existing_source_id is not None or existing_canonical_url is not None:
+        return
+    records.append(record)
+    records_by_source_id[record.source_id] = record
+    records_by_canonical_url[canonical_url] = record
 
 
 def scrape(

@@ -7,6 +7,11 @@ from bs4 import BeautifulSoup, Tag
 from bc_auction.errors import ParserContractError
 
 _SESSION_ID = re.compile(r"addSessionId\(\s*[\"']([^\"']+)[\"']\s*\)")
+_PRODUCT_GROUP = re.compile(
+    r"setValueByName\(\s*['\"]productDisID['\"]\s*,\s*['\"](?P<id>[^'\"]+)['\"]\s*\)"
+    r"\s*;\s*setValueByName\(\s*['\"]productDesc['\"]\s*,\s*['\"](?P<description>[^'\"]*)['\"]\s*\)",
+    re.DOTALL,
+)
 _REQUIRED_FIELDS = frozenset(
     {
         "doc_search_by",
@@ -46,6 +51,32 @@ class SearchForm:
             "productDesc": "Browse All Open Auctions",
         }
         return tuple((name, replacements.get(name, value)) for name, value in self.fields)
+
+    def product_group_fields(
+        self,
+        product_group: "ProductGroup",
+        *,
+        keyword: str = "",
+        display_order: str = "EndingFirst",
+    ) -> tuple[tuple[str, str], ...]:
+        if display_order not in self.display_orders:
+            raise ParserContractError(
+                f"auction search form did not permit display order: {display_order}"
+            )
+        replacements = {
+            "Keyword": keyword,
+            "display_order": display_order,
+            "dllAnchor": "",
+            "productDisID": product_group.product_dis_id,
+            "productDesc": product_group.description,
+        }
+        return tuple((name, replacements.get(name, value)) for name, value in self.fields)
+
+
+@dataclass(frozen=True, slots=True)
+class ProductGroup:
+    product_dis_id: str
+    description: str
 
 
 def parse_session_id(html: str) -> str:
@@ -118,6 +149,27 @@ def parse_search_form(html: str, page_url: str) -> SearchForm:
         session_id=session_id,
         display_orders=display_orders,
     )
+
+
+def parse_product_groups(html: str) -> tuple[ProductGroup, ...]:
+    soup = BeautifulSoup(html, "lxml")
+    product_groups: list[ProductGroup] = []
+    seen_ids: set[str] = set()
+    for link in soup.find_all("a", href=True):
+        match = _PRODUCT_GROUP.search(str(link["href"]))
+        if match is None:
+            continue
+        product_dis_id = match.group("id").strip()
+        description = re.sub(r"\\([\\&])", r"\1", match.group("description")).strip()
+        if not product_dis_id or not description:
+            raise ParserContractError("product-group link did not contain an ID and description")
+        if product_dis_id in seen_ids:
+            raise ParserContractError("auction search form repeated a product-group ID")
+        seen_ids.add(product_dis_id)
+        product_groups.append(ProductGroup(product_dis_id, description))
+    if not product_groups:
+        raise ParserContractError("auction search form did not contain product groups")
+    return tuple(product_groups)
 
 
 def _form_fields(form: Tag) -> tuple[tuple[str, str], ...]:

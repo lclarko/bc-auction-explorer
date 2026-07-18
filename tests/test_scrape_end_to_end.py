@@ -32,10 +32,16 @@ def _detail_records_by_dis_id() -> dict[str, str]:
 
     records = records[:31]
     assert len(records) == 31
-    return {
+    records_by_dis_id = {
         parse_qs(urlparse(str(record.request_url)).query)["disID"][0]: record.source_id
         for record in records
     }
+    closed_record = parse_search_results(
+        _fixture("results-closed.html").decode("utf-8"),
+        f"{_BASE_URL}/open.dll/submitDocSearch",
+    ).records[0]
+    records_by_dis_id["999"] = closed_record.source_id
+    return records_by_dis_id
 
 
 def _detail_fixture(dis_id: str, source_id: str) -> bytes:
@@ -62,6 +68,7 @@ def test_scrape_cli_runs_the_full_mocked_flow_without_serializing_session_data(
 ) -> None:
     detail_records = _detail_records_by_dis_id()
     requested_paths: list[str] = []
+    submitted_product_groups: list[dict[str, list[str]]] = []
 
     def html_response(request: httpx.Request, body: bytes) -> httpx.Response:
         return httpx.Response(
@@ -108,10 +115,16 @@ def test_scrape_cli_runs_the_full_mocked_flow_without_serializing_session_data(
             require_session(request, in_query=request.method == "GET")
             if request.method == "POST":
                 fields = parse_qs(request.content.decode(), keep_blank_values=True)
+                submitted_product_groups.append(fields)
                 assert fields["sessionID"] == [_SESSION_ID]
                 assert fields["display_order"] == ["EndingFirst"]
-                assert fields["productDisID"] == ["simpleAll"]
-                return html_response(request, _fixture("results-open-page-1.html"))
+                if fields["productDisID"] == ["5810716"]:
+                    assert fields["productDesc"] == ["Antiques and Collectibles"]
+                    return html_response(request, _fixture("results-closed.html"))
+                if fields["productDisID"] == ["4460126"]:
+                    assert fields["productDesc"] == ["Art / Photography / Music"]
+                    return html_response(request, _fixture("results-open-page-1.html"))
+                raise AssertionError(f"unexpected product group: {fields['productDisID']}")
 
             assert request.method == "GET"
             assert request.url.params.get("currentPage") == "2"
@@ -153,17 +166,17 @@ def test_scrape_cli_runs_the_full_mocked_flow_without_serializing_session_data(
         lambda: AuctionClient(min_request_interval=0, transport=httpx.MockTransport(handler)),
     )
 
-    exit_code = cli.main(["scrape", "--limit", "31"])
+    exit_code = cli.main(["scrape", "--limit", "2"])
 
     captured = capsys.readouterr()
     output = json.loads(captured.out)
     assert exit_code == 0
     assert captured.err == ""
     assert output["failures"] == []
-    assert len(output["records"]) == 31
-    assert output["records"][0]["source_id"] == "A277437"
-    assert output["records"][-1]["source_id"] == "A277450"
-    assert output["records"][0]["title"] == "Mock detail for A277437"
+    assert len(output["records"]) == 2
+    assert output["records"][0]["source_id"] == "A000001"
+    assert output["records"][-1]["source_id"] == "A277437"
+    assert output["records"][0]["title"] == "Mock detail for A000001"
     assert "request_url" not in output["records"][0]
     assert all("canonical_source_url" in record for record in output["records"])
     assert all("sessionID" not in record["canonical_source_url"] for record in output["records"])
@@ -177,6 +190,10 @@ def test_scrape_cli_runs_the_full_mocked_flow_without_serializing_session_data(
         "/open.dll/submitDocSearch",
         "/open.dll/submitDocSearch",
     ]
-    assert requested_paths.count("/open.dll/showDisplayDocument") == 31
-    assert requested_paths.count("/open.dll/showWorking") == 31
-    assert requested_paths.count("/open.dll/showDocSummary") == 31
+    assert [fields["productDisID"] for fields in submitted_product_groups] == [
+        ["5810716"],
+        ["4460126"],
+    ]
+    assert requested_paths.count("/open.dll/showDisplayDocument") == 2
+    assert requested_paths.count("/open.dll/showWorking") == 2
+    assert requested_paths.count("/open.dll/showDocSummary") == 2

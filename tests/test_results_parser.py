@@ -92,6 +92,22 @@ def test_parses_captured_empty_results_page() -> None:
     assert page.pagination is None
 
 
+def test_parses_a_single_result_without_a_pagination_range() -> None:
+    html = _fixture("results-closed.html").replace("1 - 1 / 1", "")
+
+    page = parse_search_results(html, _RESULTS_URL)
+
+    assert [record.source_id for record in page.records] == ["A000001"]
+    assert page.pagination is None
+
+
+def test_rejects_paginated_results_without_a_pagination_range() -> None:
+    html = _fixture("results-open-page-1.html").replace("1-30&nbsp;/&nbsp;131", "")
+
+    with pytest.raises(ParserContractError, match="paginated results page"):
+        parse_search_results(html, _RESULTS_URL)
+
+
 def test_parses_closed_results_without_a_listing_title() -> None:
     page = parse_search_results(_fixture("results-closed.html"), _RESULTS_URL)
 
