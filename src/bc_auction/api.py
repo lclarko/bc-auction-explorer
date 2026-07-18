@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -22,10 +22,10 @@ from bc_auction.api_models import (
     ListingDetail,
     ListingPage,
     ListingSort,
+    ListingView,
     ScrapeStatus,
 )
 from bc_auction.database import DatabaseConfigurationError, create_postgres_engine
-from bc_auction.models import AuctionStatus
 from bc_auction.read_repository import AuctionReadRepository, ListingFilters
 
 _DEFAULT_PAGE_SIZE = 25
@@ -36,10 +36,15 @@ _MAX_PAGE = 10_000
 _MAX_BID_VALUE = Decimal("999999999999.99")
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 def create_app(
     *,
     database_url: str | None = None,
     engine: Engine | None = None,
+    now_provider: Callable[[], datetime] = _utc_now,
 ) -> FastAPI:
     """Create the API application without granting any write capability."""
 
@@ -83,12 +88,12 @@ def create_app(
         keyword: Annotated[str | None, Query(max_length=200)] = None,
         location: Annotated[str | None, Query(max_length=200)] = None,
         category: Annotated[str | None, Query(max_length=200)] = None,
-        status: AuctionStatus | None = None,
         min_price: Annotated[Decimal | None, Query(ge=0, le=_MAX_BID_VALUE)] = None,
         max_price: Annotated[Decimal | None, Query(ge=0, le=_MAX_BID_VALUE)] = None,
         closing_after: datetime | None = None,
         closing_before: datetime | None = None,
-        sort: ListingSort = ListingSort.CLOSING_SOON,
+        view: ListingView = ListingView.ACTIVE,
+        sort: ListingSort | None = None,
         page: Annotated[int, Query(ge=1, le=_MAX_PAGE)] = 1,
         page_size: Annotated[int, Query(ge=1, le=_MAX_PAGE_SIZE)] = _DEFAULT_PAGE_SIZE,
     ) -> ListingPage:
@@ -102,20 +107,22 @@ def create_app(
             and normalized_closing_after > normalized_closing_before
         ):
             _raise_invalid_filter("closing_after cannot be later than closing_before")
+        request_time = _provided_utc_now(now_provider)
         return repository.list_listings(
             ListingFilters(
                 keyword=keyword,
                 location=location,
                 category=category,
-                status=status,
                 minimum_price=min_price,
                 maximum_price=max_price,
                 closing_after=normalized_closing_after,
                 closing_before=normalized_closing_before,
+                view=view,
                 sort=sort,
                 page=page,
                 page_size=page_size,
-            )
+            ),
+            request_time=request_time,
         )
 
     @app.get(
@@ -131,7 +138,10 @@ def create_app(
         source_id: Annotated[str, Path(min_length=1, max_length=64)],
         repository: Annotated[AuctionReadRepository, Depends(_read_repository)],
     ) -> ListingDetail:
-        listing = repository.get_listing(source_id)
+        listing = repository.get_listing(
+            source_id,
+            request_time=_provided_utc_now(now_provider),
+        )
         if listing is None:
             raise HTTPException(
                 status_code=404,
@@ -149,9 +159,14 @@ def create_app(
     )
     def list_locations(
         repository: Annotated[AuctionReadRepository, Depends(_read_repository)],
+        view: ListingView = ListingView.ACTIVE,
         limit: Annotated[int, Query(ge=1, le=_MAX_FACET_LIMIT)] = _DEFAULT_FACET_LIMIT,
     ) -> FacetList:
-        return repository.list_locations(limit=limit)
+        return repository.list_locations(
+            view=view,
+            request_time=_provided_utc_now(now_provider),
+            limit=limit,
+        )
 
     @app.get(
         "/api/categories",
@@ -160,9 +175,14 @@ def create_app(
     )
     def list_categories(
         repository: Annotated[AuctionReadRepository, Depends(_read_repository)],
+        view: ListingView = ListingView.ACTIVE,
         limit: Annotated[int, Query(ge=1, le=_MAX_FACET_LIMIT)] = _DEFAULT_FACET_LIMIT,
     ) -> FacetList:
-        return repository.list_categories(limit=limit)
+        return repository.list_categories(
+            view=view,
+            request_time=_provided_utc_now(now_provider),
+            limit=limit,
+        )
 
     @app.get(
         "/api/scrape-status",
@@ -189,6 +209,13 @@ def _read_repository(request: Request) -> AuctionReadRepository:
     if not isinstance(repository, AuctionReadRepository):
         raise RuntimeError("read repository is not available")
     return repository
+
+
+def _provided_utc_now(now_provider: Callable[[], datetime]) -> datetime:
+    value = now_provider()
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise RuntimeError("now_provider must return a timezone-aware datetime")
+    return value.astimezone(UTC)
 
 
 def _utc_query_datetime(value: datetime | None, field_name: str) -> datetime | None:

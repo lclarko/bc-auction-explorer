@@ -118,8 +118,14 @@ export type components = {
             /** Items */
             items: components["schemas"]["Facet"][];
         };
+        /**
+         * ListingAvailability
+         * @enum {string}
+         */
+        ListingAvailability: "active" | "scheduled_closing_passed" | "closed" | "withdrawn" | "unknown";
         /** ListingDetail */
         ListingDetail: {
+            availability: components["schemas"]["ListingAvailability"];
             /** Bid Count */
             bid_count?: number | null;
             /** Canonical Source Url */
@@ -169,6 +175,11 @@ export type components = {
             location_raw?: string | null;
             /** Minimum Bid */
             minimum_bid?: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
             /** Pickup Details */
             pickup_details?: string | null;
             /** Source Id */
@@ -194,6 +205,7 @@ export type components = {
         ListingSort: "closing_soon" | "closing_latest" | "price_low" | "price_high" | "newest_seen" | "most_bids";
         /** ListingSummary */
         ListingSummary: {
+            availability: components["schemas"]["ListingAvailability"];
             /** Bid Count */
             bid_count?: number | null;
             /** Canonical Source Url */
@@ -232,6 +244,11 @@ export type components = {
             location_qualifier?: string | null;
             /** Minimum Bid */
             minimum_bid?: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
             /** Source Id */
             source_id: string;
             /** Starting Bid */
@@ -240,6 +257,11 @@ export type components = {
             /** Title */
             title: string;
         };
+        /**
+         * ListingView
+         * @enum {string}
+         */
+        ListingView: "active" | "ended" | "all";
         /**
          * LocationStatus
          * @enum {string}
@@ -325,6 +347,7 @@ export interface operations {
     list_categories_api_categories_get: {
         parameters: {
             query?: {
+                view?: components["schemas"]["ListingView"];
                 limit?: number;
             };
             header?: never;
@@ -368,12 +391,12 @@ export interface operations {
                 keyword?: string | null;
                 location?: string | null;
                 category?: string | null;
-                status?: components["schemas"]["AuctionStatus"] | null;
                 min_price?: number | string | null;
                 max_price?: number | string | null;
                 closing_after?: string | null;
                 closing_before?: string | null;
-                sort?: components["schemas"]["ListingSort"];
+                view?: components["schemas"]["ListingView"];
+                sort?: components["schemas"]["ListingSort"] | null;
                 page?: number;
                 page_size?: number;
             };
@@ -464,6 +487,7 @@ export interface operations {
     list_locations_api_locations_get: {
         parameters: {
             query?: {
+                view?: components["schemas"]["ListingView"];
                 limit?: number;
             };
             header?: never;

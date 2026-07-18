@@ -90,9 +90,23 @@
         "title": "FacetList",
         "type": "object"
       },
+      "ListingAvailability": {
+        "enum": [
+          "active",
+          "scheduled_closing_passed",
+          "closed",
+          "withdrawn",
+          "unknown"
+        ],
+        "title": "ListingAvailability",
+        "type": "string"
+      },
       "ListingDetail": {
         "additionalProperties": false,
         "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ListingAvailability"
+          },
           "bid_count": {
             "anyOf": [
               {
@@ -278,6 +292,11 @@
             ],
             "title": "Minimum Bid"
           },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
           "pickup_details": {
             "anyOf": [
               {
@@ -331,6 +350,8 @@
           "canonical_source_url",
           "title",
           "status",
+          "availability",
+          "observed_at",
           "first_seen_at",
           "last_seen_at",
           "last_changed_at"
@@ -374,6 +395,9 @@
       "ListingSummary": {
         "additionalProperties": false,
         "properties": {
+          "availability": {
+            "$ref": "#/components/schemas/ListingAvailability"
+          },
           "bid_count": {
             "anyOf": [
               {
@@ -494,6 +518,11 @@
             ],
             "title": "Minimum Bid"
           },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
           "source_id": {
             "minLength": 1,
             "title": "Source Id",
@@ -525,12 +554,23 @@
           "canonical_source_url",
           "title",
           "status",
+          "availability",
+          "observed_at",
           "first_seen_at",
           "last_seen_at",
           "last_changed_at"
         ],
         "title": "ListingSummary",
         "type": "object"
+      },
+      "ListingView": {
+        "enum": [
+          "active",
+          "ended",
+          "all"
+        ],
+        "title": "ListingView",
+        "type": "string"
       },
       "LocationStatus": {
         "enum": [
@@ -772,6 +812,15 @@
         "parameters": [
           {
             "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ListingView",
+              "default": "active"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -875,22 +924,6 @@
           },
           {
             "in": "query",
-            "name": "status",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "$ref": "#/components/schemas/AuctionStatus"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Status"
-            }
-          },
-          {
-            "in": "query",
             "name": "min_price",
             "required": false,
             "schema": {
@@ -969,11 +1002,27 @@
           },
           {
             "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ListingView",
+              "default": "active"
+            }
+          },
+          {
+            "in": "query",
             "name": "sort",
             "required": false,
             "schema": {
-              "$ref": "#/components/schemas/ListingSort",
-              "default": "closing_soon"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ListingSort"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sort"
             }
           },
           {
@@ -1101,6 +1150,15 @@
       "get": {
         "operationId": "list_locations_api_locations_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "view",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ListingView",
+              "default": "active"
+            }
+          },
           {
             "in": "query",
             "name": "limit",
