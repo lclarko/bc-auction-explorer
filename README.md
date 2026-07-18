@@ -33,6 +33,8 @@ does not attempt to bypass source access controls.
 
 Each detail listing currently requires several public source requests, so a run's
 duration is governed by both source response time and the request interval. The
+interactive CLI shows phase progress and an ETA on stderr while structured JSON
+remains on stdout for redirection or processing. The
 read-only scrape-status endpoint reports aggregate request, retry, rate-limit, and
 timing metrics for each completed run. It never exposes request URLs, cookies, or
 session identifiers.

@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
@@ -219,6 +220,44 @@ class _FakePersistenceEngine:
         self.disposed = True
 
 
+class _RecordingProgress:
+    def __init__(self) -> None:
+        self.events: list[tuple[object, ...]] = []
+
+    def start_search(self) -> None:
+        self.events.append(("start_search",))
+
+    def start_search_groups(self, total: int) -> None:
+        self.events.append(("start_search_groups", total))
+
+    def advance_search_group(self, *, unique_listings: int, pages_visited: int) -> None:
+        self.events.append(("advance_search_group", unique_listings, pages_visited))
+
+    def finish_search(self, *, unique_listings: int, pages_visited: int) -> None:
+        self.events.append(("finish_search", unique_listings, pages_visited))
+
+    def start_details(self, total: int) -> None:
+        self.events.append(("start_details", total))
+
+    def advance_detail(self, *, failures: int) -> None:
+        self.events.append(("advance_detail", failures))
+
+    def finish_details(self, *, successful: int, failures: int) -> None:
+        self.events.append(("finish_details", successful, failures))
+
+    def start_persistence(self, total: int) -> None:
+        self.events.append(("start_persistence", total))
+
+    def advance_persistence(self, *, created: int, updated: int, failures: int) -> None:
+        self.events.append(("advance_persistence", created, updated, failures))
+
+    def finish_persistence(self, *, created: int, updated: int, failures: int) -> None:
+        self.events.append(("finish_persistence", created, updated, failures))
+
+    def close(self) -> None:
+        self.events.append(("close",))
+
+
 def test_persist_creates_and_finishes_a_successful_scrape_run(monkeypatch, capsys) -> None:
     repository = _FakePersistenceRepository()
     monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
@@ -382,6 +421,96 @@ def test_manual_scrape_reports_an_unavailable_detail(monkeypatch, capsys) -> Non
     assert output["failures"][0]["source_id"] == "A277437"
     assert "not a BC Auction item detail page" in output["failures"][0]["error"]
     assert captured.err == "1 listing failures\n"
+
+
+def test_scrape_reports_search_and_detail_progress_before_completion() -> None:
+    class FailingSecondDetailClient(_TwoRecordClient):
+        def __init__(self) -> None:
+            self.detail_calls = 0
+
+        def get_item_detail(self, source_url: str) -> FetchedPage:
+            self.detail_calls += 1
+            if self.detail_calls == 2:
+                raise ParserContractError("second detail failed")
+            return super().get_item_detail(source_url)
+
+    progress = _RecordingProgress()
+    outcome = cli._scrape_with_outcome(FailingSecondDetailClient(), 2, progress=progress)
+
+    assert len(outcome.records) == 1
+    assert len(outcome.failures) == 1
+    assert progress.events == [
+        ("start_search",),
+        ("start_search_groups", 1),
+        ("advance_search_group", 2, 1),
+        ("finish_search", 2, 1),
+        ("start_details", 2),
+        ("advance_detail", 0),
+        ("advance_detail", 1),
+        ("finish_details", 1, 1),
+    ]
+
+
+def test_persistence_progress_advances_for_each_storage_attempt() -> None:
+    class FailingSecondRepository:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def persist_reconciled_record(self, _run_id: UUID, _record: object) -> PersistResult:
+            self.calls += 1
+            if self.calls == 2:
+                raise PersistenceError("database rejected auction persistence")
+            return PersistResult(created=True, updated=False, observation_created=True)
+
+    records = cli._scrape_with_outcome(_TwoRecordClient(), 2).records
+    progress = _RecordingProgress()
+
+    results, failures = cli._persist_records(
+        FailingSecondRepository(),
+        UUID("00000000-0000-0000-0000-000000000001"),
+        records,
+        progress=progress,
+    )
+
+    assert len(results) == 1
+    assert len(failures) == 1
+    assert progress.events == [
+        ("start_persistence", 2),
+        ("advance_persistence", 1, 0, 0),
+        ("advance_persistence", 1, 0, 1),
+        ("finish_persistence", 1, 0, 1),
+    ]
+
+
+def test_terminal_progress_is_interactive_and_never_receives_source_urls() -> None:
+    class InteractiveStream(StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    stream = InteractiveStream()
+    progress = cli._create_progress_reporter(stream)
+
+    assert progress is not None
+    outcome = cli._scrape_with_outcome(_TwoRecordClient(), 2, progress=progress)
+    repository = _FakePersistenceRepository()
+    results, failures = cli._persist_records(
+        repository,
+        repository.run_id,
+        outcome.records,
+        progress=progress,
+    )
+    progress.close()
+
+    assert len(results) == 2
+    assert failures == []
+    rendered = stream.getvalue()
+    assert "Preparing public auction search" in rendered
+    assert "Enumerating product groups" in rendered
+    assert "Fetching listing details" in rendered
+    assert "Saving listing observations" in rendered
+    assert "sessionID" not in rendered
+    assert "SESSION_ID" not in rendered
+    assert "showDisplayDocument" not in rendered
 
 
 def test_collect_search_records_follows_pagination() -> None:

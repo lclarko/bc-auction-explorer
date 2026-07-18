@@ -10,10 +10,11 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, TextIO, cast
 from uuid import UUID
 
 import httpx
+from tqdm import tqdm
 
 from bc_auction.client import AuctionClient, FetchedPage
 from bc_auction.errors import ParserContractError, ScraperError
@@ -56,6 +57,117 @@ class _ScrapeOutcome:
     items_seen: int
 
 
+class _ProgressBar(Protocol):
+    total: float | None
+    n: float
+
+    def close(self) -> None: ...
+
+    def set_postfix_str(self, s: str = "", refresh: bool = True) -> None: ...
+
+    def update(self, n: float = 1) -> bool: ...
+
+
+class _ScrapeProgress(Protocol):
+    def start_search(self) -> None: ...
+
+    def start_search_groups(self, total: int) -> None: ...
+
+    def advance_search_group(self, *, unique_listings: int, pages_visited: int) -> None: ...
+
+    def finish_search(self, *, unique_listings: int, pages_visited: int) -> None: ...
+
+    def start_details(self, total: int) -> None: ...
+
+    def advance_detail(self, *, failures: int) -> None: ...
+
+    def finish_details(self, *, successful: int, failures: int) -> None: ...
+
+    def start_persistence(self, total: int) -> None: ...
+
+    def advance_persistence(self, *, created: int, updated: int, failures: int) -> None: ...
+
+    def finish_persistence(self, *, created: int, updated: int, failures: int) -> None: ...
+
+    def close(self) -> None: ...
+
+
+class _TerminalScrapeProgress:
+    """Render compact scrape progress to an interactive terminal's stderr."""
+
+    def __init__(self, stream: TextIO) -> None:
+        self._stream = stream
+        self._bar: _ProgressBar | None = None
+
+    def start_search(self) -> None:
+        print("Preparing public auction search...", file=self._stream, flush=True)
+
+    def start_search_groups(self, total: int) -> None:
+        self._start_bar(total, "Enumerating product groups", "group")
+
+    def advance_search_group(self, *, unique_listings: int, pages_visited: int) -> None:
+        self._advance(f"{unique_listings} unique, {pages_visited} pages")
+
+    def finish_search(self, *, unique_listings: int, pages_visited: int) -> None:
+        self._finish_bar(f"{unique_listings} unique, {pages_visited} pages")
+
+    def start_details(self, total: int) -> None:
+        self._start_bar(total, "Fetching listing details", "listing")
+
+    def advance_detail(self, *, failures: int) -> None:
+        self._advance(f"{failures} failed")
+
+    def finish_details(self, *, successful: int, failures: int) -> None:
+        self._finish_bar(f"{successful} complete, {failures} failed")
+
+    def start_persistence(self, total: int) -> None:
+        self._start_bar(total, "Saving listing observations", "listing")
+
+    def advance_persistence(self, *, created: int, updated: int, failures: int) -> None:
+        self._advance(f"{created} created, {updated} updated, {failures} failed")
+
+    def finish_persistence(self, *, created: int, updated: int, failures: int) -> None:
+        self._finish_bar(f"{created} created, {updated} updated, {failures} failed")
+
+    def close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
+
+    def _start_bar(self, total: int, description: str, unit: str) -> None:
+        self.close()
+        self._bar = cast(
+            _ProgressBar,
+            tqdm(
+                total=total,
+                desc=description,
+                unit=unit,
+                dynamic_ncols=True,
+                file=self._stream,
+            ),
+        )
+
+    def _advance(self, postfix: str) -> None:
+        if self._bar is None:
+            return
+        self._bar.update()
+        self._bar.set_postfix_str(postfix)
+
+    def _finish_bar(self, postfix: str) -> None:
+        if self._bar is None:
+            return
+        self._bar.set_postfix_str(postfix)
+        if self._bar.total is not None and self._bar.n < self._bar.total:
+            self._bar.total = self._bar.n
+        self.close()
+
+
+def _create_progress_reporter(stream: TextIO) -> _ScrapeProgress | None:
+    if not stream.isatty():
+        return None
+    return _TerminalScrapeProgress(stream)
+
+
 class _PersistenceBatchFailure(RuntimeError):
     def __init__(
         self,
@@ -80,8 +192,13 @@ def _collect_search_records(
     *,
     keyword: str = "",
     display_order: str = "EndingFirst",
+    progress: _ScrapeProgress | None = None,
 ) -> _SearchCollection:
+    if progress is not None:
+        progress.start_search()
     search = client.prepare_open_auction_search()
+    if progress is not None:
+        progress.start_search_groups(len(search.product_groups))
     records: list[SearchResultRecord] = []
     records_by_source_id: dict[str, SearchResultRecord] = {}
     records_by_canonical_url: dict[str, SearchResultRecord] = {}
@@ -110,6 +227,11 @@ def _collect_search_records(
             on_record=add_search_record,
         )
         pages_visited += group_collection.pages_visited
+        if progress is not None:
+            progress.advance_search_group(
+                unique_listings=len(records),
+                pages_visited=pages_visited,
+            )
 
     return _SearchCollection(records=tuple(records[:limit]), pages_visited=pages_visited)
 
@@ -194,6 +316,7 @@ def scrape(
     keyword: str = "",
     display_order: str = "EndingFirst",
     results_only: bool = False,
+    progress: _ScrapeProgress | None = None,
 ) -> tuple[list[_ScrapeRecord], list[dict[str, str]]]:
     outcome = _scrape_with_outcome(
         client,
@@ -201,6 +324,7 @@ def scrape(
         keyword=keyword,
         display_order=display_order,
         results_only=results_only,
+        progress=progress,
     )
     return outcome.records, outcome.failures
 
@@ -212,13 +336,20 @@ def _scrape_with_outcome(
     keyword: str = "",
     display_order: str = "EndingFirst",
     results_only: bool = False,
+    progress: _ScrapeProgress | None = None,
 ) -> _ScrapeOutcome:
     search_records = _collect_search_records(
         client,
         limit,
         keyword=keyword,
         display_order=display_order,
+        progress=progress,
     )
+    if progress is not None:
+        progress.finish_search(
+            unique_listings=len(search_records.records),
+            pages_visited=search_records.pages_visited,
+        )
     if results_only:
         return _ScrapeOutcome(
             records=list(search_records.records),
@@ -229,6 +360,8 @@ def _scrape_with_outcome(
 
     records: list[_ScrapeRecord] = []
     failures: list[dict[str, str]] = []
+    if progress is not None:
+        progress.start_details(len(search_records.records))
     for search_result in search_records.records:
         try:
             detail_page = client.get_item_detail(str(search_result.request_url))
@@ -242,6 +375,11 @@ def _scrape_with_outcome(
                     "error": _redact_session_id(str(exc)),
                 }
             )
+        finally:
+            if progress is not None:
+                progress.advance_detail(failures=len(failures))
+    if progress is not None:
+        progress.finish_details(successful=len(records), failures=len(failures))
     return _ScrapeOutcome(
         records=records,
         failures=failures,
@@ -307,6 +445,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     outcome: _ScrapeOutcome | None = None
     counts: ScrapeRunCounts | None = None
     metrics: ScrapeRunMetrics | None = None
+    progress = _create_progress_reporter(sys.stderr)
     run_finished = False
     try:
         if args.persist and args.results_only:
@@ -326,6 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     keyword=args.keyword,
                     display_order=args.display_order,
                     results_only=args.results_only,
+                    progress=progress,
                 )
             finally:
                 metrics = _scrape_run_metrics(client) if args.persist else None
@@ -338,6 +478,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     repository,
                     run_id,
                     records,
+                    progress=progress,
                 )
             except _PersistenceBatchFailure as exc:
                 failures.extend(exc.failures)
@@ -370,14 +511,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             output["persistence"] = {"scrape_run_id": str(run_id)}
         _write_output(args.output, output)
     except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
+        if progress is not None:
+            progress.close()
         _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
+        if progress is not None:
+            progress.close()
         _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     finally:
+        if progress is not None:
+            progress.close()
         if engine is not None:
             engine.dispose()
 
@@ -422,6 +569,8 @@ def _persist_records(
     repository: AuctionRepository,
     run_id: UUID,
     records: Sequence[_ScrapeRecord],
+    *,
+    progress: _ScrapeProgress | None = None,
 ) -> tuple[list[PersistResult], list[dict[str, str]]]:
     from bc_auction.persistence import (
         IdentityConflictError,
@@ -431,12 +580,19 @@ def _persist_records(
 
     results: list[PersistResult] = []
     failures: list[dict[str, str]] = []
+    created = 0
+    updated = 0
+    if progress is not None:
+        progress.start_persistence(len(records))
     for record in records:
         if not isinstance(record, AuctionDetailRecord):
             raise ValueError("persistence requires detail-complete records")
         try:
             persisted_record = convert_reconciled_record(record, observed_at=datetime.now(UTC))
-            results.append(repository.persist_reconciled_record(run_id, persisted_record))
+            result = repository.persist_reconciled_record(run_id, persisted_record)
+            results.append(result)
+            created += result.created
+            updated += result.updated
         except IdentityConflictError:
             failures.append(
                 {
@@ -454,6 +610,15 @@ def _persist_records(
                     "error": "persistence failed",
                 }
             )
+        finally:
+            if progress is not None:
+                progress.advance_persistence(
+                    created=created,
+                    updated=updated,
+                    failures=len(failures),
+                )
+    if progress is not None:
+        progress.finish_persistence(created=created, updated=updated, failures=len(failures))
     return results, failures
 
 
