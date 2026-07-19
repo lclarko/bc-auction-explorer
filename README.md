@@ -122,6 +122,69 @@ For production, serve `frontend/dist` as static files, proxy `/api` to the FastA
 application, and route all remaining paths to the frontend entry point so direct links
 to listing details continue to work.
 
+## Production runtime
+
+The default production stack is provider-neutral Docker Compose. It builds images locally,
+uses Caddy as its replaceable edge proxy, keeps PostgreSQL on an internal network, and
+binds the proxy to loopback by default. Public ingress, tunnels, and host firewall policy
+belong to the deployment environment.
+
+Copy the example configuration and create four password files outside the repository. Each
+file must contain one password and be readable only by the deployment account:
+
+```bash
+cp .env.example .env
+mkdir -p /etc/bc-auction-explorer/secrets
+chmod 700 /etc/bc-auction-explorer/secrets
+```
+
+Set the four `*_PASSWORD_FILE` paths in `.env`, create the referenced files with mode
+`0600`, then start the stack:
+
+```bash
+docker compose --env-file .env -f compose.production.yaml up -d --build
+docker compose --env-file .env -f compose.production.yaml ps
+```
+
+Only the proxy publishes ports. `/health/live` reports process liveness and `/health/ready`
+reports API database readiness. `/health/operations` is intentionally internal to the
+Compose network and reports the scheduler-derived freshness state without exposing it
+through the default proxy. The public `/api/scrape-status` remains session-free and omits
+persistence identifiers.
+
+The operations service scrapes at 06:00, 12:00, and 18:00 in the configured timezone. It
+uses a PostgreSQL advisory lock, so a second scheduler cannot overlap a running scrape. It
+starts one scrape only when no successful complete scrape is already present. A complete
+scrape requires full source enumeration, so the production limit defaults to 1000.
+
+To upgrade, pull the desired Git revision, review `.env`, rebuild, and let the one-shot
+migration service finish before the API and operations service start:
+
+```bash
+docker compose --env-file .env -f compose.production.yaml up -d --build
+```
+
+### Backup and restore
+
+Back up PostgreSQL to an operator-supplied host directory:
+
+```bash
+scripts/backup-db.sh /srv/bc-auction-backups
+```
+
+The command creates a validated custom-format `pg_dump` archive. To restore an archive,
+use the explicit destructive flag. The script stops writers, validates the archive, restores
+with the migration role, upgrades to the current migration head, verifies readiness, and
+restarts application services:
+
+```bash
+scripts/restore-db.sh --replace /srv/bc-auction-backups/bc-auction-20260719T120000Z.dump
+```
+
+Keep `.env`, the external secret files, and any host-specific ingress configuration backed
+up separately. Backup schedules, remote storage, retention, encryption, alerts, and
+hardware-recovery procedures are deployment-specific follow-up work.
+
 Run the standard checks before merge:
 
 ```bash

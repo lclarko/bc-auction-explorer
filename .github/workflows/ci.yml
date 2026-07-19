@@ -42,6 +42,8 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev]'
+      - run: python -m pip install uv==0.11.29
+      - run: uv lock --check
       - run: psql -h localhost -U bc_auction -d bc_auction -c 'CREATE DATABASE bc_auction_test'
       - run: alembic upgrade head
       - run: pytest
@@ -100,3 +102,50 @@ jobs:
           path: frontend/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - name: Validate production Compose and image definitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir="$(mktemp -d)"
+          for secret_name in postgres_admin_password migration_password scraper_password api_password; do
+            printf 'ci-only-password\n' > "$secret_dir/$secret_name"
+            chmod 600 "$secret_dir/$secret_name"
+          done
+          export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
+          export BC_AUCTION_MIGRATION_PASSWORD_FILE="$secret_dir/migration_password"
+          export BC_AUCTION_SCRAPER_PASSWORD_FILE="$secret_dir/scraper_password"
+          export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
+          docker compose -f compose.production.yaml config --quiet
+          docker buildx build --platform linux/amd64,linux/arm64 --target api -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 -f frontend/Dockerfile frontend
+          docker buildx build --platform linux/amd64,linux/arm64 -f docker/proxy/Dockerfile docker/proxy
+      - name: Smoke test production API and frontend without source requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir="$(mktemp -d)"
+          trap 'docker compose -f compose.production.yaml down -v' EXIT
+          for secret_name in postgres_admin_password migration_password scraper_password api_password; do
+            printf 'ci-only-password\n' > "$secret_dir/$secret_name"
+            chmod 600 "$secret_dir/$secret_name"
+          done
+          export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
+          export BC_AUCTION_MIGRATION_PASSWORD_FILE="$secret_dir/migration_password"
+          export BC_AUCTION_SCRAPER_PASSWORD_FILE="$secret_dir/scraper_password"
+          export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
+          docker compose -f compose.production.yaml up -d --build postgres migrate api frontend proxy
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health/ready; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8080/
+          test "$(docker compose -f compose.production.yaml port postgres 5432 2>/dev/null || true)" = ""

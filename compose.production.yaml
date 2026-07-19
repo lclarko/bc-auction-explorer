@@ -1,0 +1,190 @@
+name: bc-auction-explorer
+
+x-runtime-security: &runtime-security
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777,noexec,nosuid,size=64m
+
+x-application-build: &application-build
+  context: .
+  dockerfile: docker/Dockerfile
+  args:
+    BC_AUCTION_VERSION: ${BC_AUCTION_VERSION:-development}
+    BC_AUCTION_GIT_COMMIT: ${BC_AUCTION_GIT_COMMIT:-unknown}
+    BC_AUCTION_BUILD_TIMESTAMP: ${BC_AUCTION_BUILD_TIMESTAMP:-unknown}
+
+services:
+  postgres:
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    environment:
+      POSTGRES_DB: ${BC_AUCTION_DATABASE_NAME:-bc_auction}
+      POSTGRES_USER: bc_auction_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_admin_password
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/production/initdb:/docker-entrypoint-initdb.d:ro
+    networks:
+      - database
+    secrets:
+      - postgres_admin_password
+      - migration_password
+      - scraper_password
+      - api_password
+
+  migrate:
+    <<: *runtime-security
+    build:
+      <<: *application-build
+      target: migrate
+    environment: &migration-environment
+      BC_AUCTION_DATABASE_HOST: postgres
+      BC_AUCTION_DATABASE_NAME: ${BC_AUCTION_DATABASE_NAME:-bc_auction}
+      BC_AUCTION_DATABASE_USER: bc_auction_migration
+      BC_AUCTION_DATABASE_PASSWORD_FILE: /run/secrets/migration_password
+      BC_AUCTION_LOG_LEVEL: ${BC_AUCTION_LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - database
+    secrets:
+      - migration_password
+
+  api:
+    <<: *runtime-security
+    build:
+      <<: *application-build
+      target: api
+    environment: &api-environment
+      BC_AUCTION_DATABASE_HOST: postgres
+      BC_AUCTION_DATABASE_NAME: ${BC_AUCTION_DATABASE_NAME:-bc_auction}
+      BC_AUCTION_DATABASE_USER: bc_auction_api
+      BC_AUCTION_DATABASE_PASSWORD_FILE: /run/secrets/api_password
+      BC_AUCTION_LOG_LEVEL: ${BC_AUCTION_LOG_LEVEL:-INFO}
+      BC_AUCTION_TIMEZONE: ${BC_AUCTION_TIMEZONE:-America/Vancouver}
+      BC_AUCTION_SCRAPE_TIMES: ${BC_AUCTION_SCRAPE_TIMES:-06:00,12:00,18:00}
+      BC_AUCTION_SCRAPE_LIMIT: ${BC_AUCTION_SCRAPE_LIMIT:-1000}
+      BC_AUCTION_SCRAPE_FRESHNESS_MAX_AGE_SECONDS: ${BC_AUCTION_SCRAPE_FRESHNESS_MAX_AGE_SECONDS:-28800}
+      BC_AUCTION_SCRAPE_MAX_RUN_SECONDS: ${BC_AUCTION_SCRAPE_MAX_RUN_SECONDS:-7200}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready').read()"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - edge
+      - database
+    secrets:
+      - api_password
+
+  operations:
+    <<: *runtime-security
+    build:
+      <<: *application-build
+      target: operations
+    environment:
+      BC_AUCTION_DATABASE_HOST: postgres
+      BC_AUCTION_DATABASE_NAME: ${BC_AUCTION_DATABASE_NAME:-bc_auction}
+      BC_AUCTION_DATABASE_USER: bc_auction_scraper
+      BC_AUCTION_DATABASE_PASSWORD_FILE: /run/secrets/scraper_password
+      BC_AUCTION_LOG_LEVEL: ${BC_AUCTION_LOG_LEVEL:-INFO}
+      BC_AUCTION_TIMEZONE: ${BC_AUCTION_TIMEZONE:-America/Vancouver}
+      BC_AUCTION_SCRAPE_TIMES: ${BC_AUCTION_SCRAPE_TIMES:-06:00,12:00,18:00}
+      BC_AUCTION_SCRAPE_LIMIT: ${BC_AUCTION_SCRAPE_LIMIT:-1000}
+      BC_AUCTION_SCRAPE_FRESHNESS_MAX_AGE_SECONDS: ${BC_AUCTION_SCRAPE_FRESHNESS_MAX_AGE_SECONDS:-28800}
+      BC_AUCTION_SCRAPE_MAX_RUN_SECONDS: ${BC_AUCTION_SCRAPE_MAX_RUN_SECONDS:-7200}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "bc_auction.healthcheck", "operations"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30m
+    restart: unless-stopped
+    stop_grace_period: 90s
+    networks:
+      - database
+      - source_egress
+    secrets:
+      - scraper_password
+
+  frontend:
+    <<: *runtime-security
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/healthz | grep -qx ok"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    networks:
+      - edge
+
+  proxy:
+    <<: *runtime-security
+    build:
+      context: ./docker/proxy
+      dockerfile: Dockerfile
+    environment:
+      BC_AUCTION_SITE_ADDRESS: ${BC_AUCTION_SITE_ADDRESS:-http://localhost:8080}
+    depends_on:
+      api:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "${BC_AUCTION_BIND_ADDRESS:-127.0.0.1}:${BC_AUCTION_HTTP_PORT:-8080}:8080"
+      - "${BC_AUCTION_BIND_ADDRESS:-127.0.0.1}:${BC_AUCTION_HTTPS_PORT:-8443}:8443"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/health/live >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    volumes:
+      - edge_runtime_data:/data
+      - edge_runtime_config:/config
+    networks:
+      - edge
+
+networks:
+  edge:
+  database:
+    internal: true
+  source_egress:
+
+volumes:
+  postgres_data:
+  edge_runtime_data:
+  edge_runtime_config:
+
+secrets:
+  postgres_admin_password:
+    file: ${BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE:?set BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE}
+  migration_password:
+    file: ${BC_AUCTION_MIGRATION_PASSWORD_FILE:?set BC_AUCTION_MIGRATION_PASSWORD_FILE}
+  scraper_password:
+    file: ${BC_AUCTION_SCRAPER_PASSWORD_FILE:?set BC_AUCTION_SCRAPER_PASSWORD_FILE}
+  api_password:
+    file: ${BC_AUCTION_API_PASSWORD_FILE:?set BC_AUCTION_API_PASSWORD_FILE}
