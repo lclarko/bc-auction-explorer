@@ -24,7 +24,7 @@ import {
   withFirstPage,
   type ListingSearch,
 } from "../lib/search";
-import { listingLifecycleText, pacificDateTime, useLifecycleClock } from "../lib/time";
+import { listingInventoryText, listingLifecycleText, pacificDateTime, useLifecycleClock } from "../lib/time";
 
 const viewContent: Record<
   ListingView,
@@ -421,6 +421,7 @@ export function ListingBrowserPage() {
                       now,
                     )
                   : null;
+                const inventoryText = listingInventoryText(listing.inventory_state);
                 return (
                   <li key={listing.source_id}>
                     <article className="listing-card">
@@ -459,6 +460,7 @@ export function ListingBrowserPage() {
                           </div>
                         </dl>
                         {lifecycleText ? <p className="closing-passed">{lifecycleText}</p> : null}
+                        {inventoryText ? <p className="closing-passed">{inventoryText}</p> : null}
                         <div className="listing-links">
                           <Link to={listingPath(listing.source_id, canonicalSearchParameterString)}>View details</Link>
                           <a href={listing.canonical_source_url}>View source listing</a>

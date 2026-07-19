@@ -28,10 +28,13 @@ const listing = {
   bid_count: 0,
   canonical_source_url: "https://www.bcauction.ca/open?id=ABC-123",
   closing_at: "2099-07-20T19:00:00Z",
+  complete_absence_count: 0,
   current_bid: "0.00",
   first_seen_at: "2026-07-16T19:00:00Z",
   image_urls: [],
+  inventory_state: "current" as "current" | "not_observed" | "stale",
   last_changed_at: "2026-07-16T19:00:00Z",
+  last_complete_seen_at: "2026-07-16T19:00:00Z",
   last_seen_at: "2026-07-16T19:00:00Z",
   location: "Victoria",
   minimum_bid: "0.00",
@@ -199,6 +202,13 @@ describe("ListingBrowserPage", () => {
     expect(listingRequestUrls.at(-1)?.searchParams.get("view")).toBe("active");
     expect(await screen.findByRole("option", { name: "Victoria (1)" })).toBeInTheDocument();
     expect(await screen.findByRole("option", { name: "Office (1)" })).toBeInTheDocument();
+  });
+
+  it("labels an indexed listing that was absent from complete refreshes", async () => {
+    activeListing = { ...listing, inventory_state: "stale" };
+    renderPage("/?view=all");
+
+    expect(await screen.findByText("Stale or unavailable.")).toBeInTheDocument();
   });
 
   it("applies a keyword through the existing filter form", async () => {
