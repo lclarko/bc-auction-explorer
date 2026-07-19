@@ -1,14 +1,12 @@
-FROM ghcr.io/astral-sh/uv:0.11.29 AS uv
-
 FROM python:3.12-slim@sha256:f3fa41d74a768c2fce8016b98c191ae8c1bacd8f1152870a3f9f87d350920b7c AS build
-COPY --from=uv /uv /uvx /usr/local/bin/
 WORKDIR /app
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/opt/bc-auction-venv
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-RUN uv sync --frozen --no-dev --no-editable
+RUN pip install --no-cache-dir uv==0.11.29 \
+    && uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim@sha256:f3fa41d74a768c2fce8016b98c191ae8c1bacd8f1152870a3f9f87d350920b7c AS runtime
 ARG BC_AUCTION_VERSION=development
