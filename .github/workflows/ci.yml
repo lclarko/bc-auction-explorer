@@ -125,9 +125,12 @@ jobs:
           export BC_AUCTION_SCRAPER_PASSWORD_FILE="$secret_dir/scraper_password"
           export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
           docker compose -f compose.production.yaml config --quiet
-          docker buildx build --platform linux/amd64,linux/arm64 --target api -f docker/Dockerfile .
-          docker buildx build --platform linux/amd64,linux/arm64 -f frontend/Dockerfile frontend
-          docker buildx build --platform linux/amd64,linux/arm64 -f docker/proxy/Dockerfile docker/proxy
+          docker buildx build --platform linux/amd64,linux/arm64 --target api \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-api.tar" -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-frontend.tar" -f frontend/Dockerfile frontend
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-proxy.tar" -f docker/proxy/Dockerfile docker/proxy
       - name: Smoke test production API and frontend without source requests
         shell: bash
         run: |
