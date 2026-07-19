@@ -154,6 +154,7 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:8080/health/ready
           curl --fail --silent http://127.0.0.1:8080/
+          test "$(docker compose -f compose.production.yaml exec -T api id -u)" = "10001"
           test "$(docker compose -f compose.production.yaml port postgres 5432 2>/dev/null || true)" = ""
           backup_dir="$RUNNER_TEMP/bc-auction-backups"
           mkdir -p "$backup_dir"

@@ -19,7 +19,9 @@ x-application-build: &application-build
 
 services:
   postgres:
-    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+    build:
+      context: ./docker/production
+      dockerfile: postgres.Dockerfile
     environment:
       POSTGRES_DB: ${BC_AUCTION_DATABASE_NAME:-bc_auction}
       POSTGRES_USER: bc_auction_admin
@@ -44,6 +46,8 @@ services:
 
   migrate:
     <<: *runtime-security
+    cap_add:
+      - CHOWN
     build:
       <<: *application-build
       target: migrate
@@ -64,6 +68,8 @@ services:
 
   api:
     <<: *runtime-security
+    cap_add:
+      - CHOWN
     build:
       <<: *application-build
       target: api
@@ -96,6 +102,8 @@ services:
 
   operations:
     <<: *runtime-security
+    cap_add:
+      - CHOWN
     build:
       <<: *application-build
       target: operations

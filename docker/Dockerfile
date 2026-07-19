@@ -25,7 +25,8 @@ RUN groupadd --gid 10001 bcauction \
     && useradd --uid 10001 --gid bcauction --create-home --shell /usr/sbin/nologin bcauction
 WORKDIR /app
 COPY --from=build --chown=bcauction:bcauction /opt/bc-auction-venv /opt/bc-auction-venv
-USER bcauction
+COPY docker/entrypoint.sh /usr/local/bin/bc-auction-entrypoint
+ENTRYPOINT ["/usr/local/bin/bc-auction-entrypoint"]
 
 FROM runtime AS api
 EXPOSE 8000
