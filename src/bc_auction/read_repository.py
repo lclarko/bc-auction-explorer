@@ -21,12 +21,17 @@ from bc_auction.api_models import (
     ListingSort,
     ListingSummary,
     ListingView,
+    OperationsConfiguration,
+    OperationsHealth,
+    OperationsRun,
+    OperationsState,
     PageInfo,
     ScrapeRunSummary,
     ScrapeStatus,
 )
 from bc_auction.database import auction_items, item_observations, scrape_runs
 from bc_auction.models import AuctionStatus
+from bc_auction.runtime import OperationsSettings, RuntimeMetadata
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +227,96 @@ class AuctionReadRepository:
             latest_complete_age_seconds=latest_complete_age_seconds,
             active_listing_count=int(active_listing_count),
             stale_listing_count=int(stale_listing_count),
+        )
+
+    def operations_status(
+        self,
+        *,
+        request_time: datetime,
+        started_at: datetime,
+        metadata: RuntimeMetadata,
+        settings: OperationsSettings,
+    ) -> OperationsHealth:
+        run_columns = (
+            scrape_runs.c.id,
+            scrape_runs.c.started_at,
+            scrape_runs.c.finished_at,
+            scrape_runs.c.status,
+            scrape_runs.c.completion_status,
+        )
+        scheduled_runs = (
+            select(*run_columns)
+            .where(scrape_runs.c.mode == "scheduled")
+            .order_by(
+                scrape_runs.c.started_at.desc(),
+                scrape_runs.c.created_at.desc(),
+                scrape_runs.c.id.desc(),
+            )
+        )
+        complete_runs = (
+            select(*run_columns)
+            .where(
+                scrape_runs.c.status == "succeeded",
+                scrape_runs.c.completion_status == "complete",
+            )
+            .order_by(
+                scrape_runs.c.finished_at.desc(),
+                scrape_runs.c.created_at.desc(),
+                scrape_runs.c.id.desc(),
+            )
+        )
+        with self._engine.connect() as connection:
+            latest_scheduled = connection.execute(scheduled_runs.limit(1)).mappings().one_or_none()
+            latest_complete = connection.execute(complete_runs.limit(1)).mappings().one_or_none()
+            failures_statement = select(func.count()).select_from(scrape_runs).where(
+                scrape_runs.c.mode == "scheduled",
+                or_(
+                    scrape_runs.c.status != "succeeded",
+                    scrape_runs.c.completion_status != "complete",
+                ),
+            )
+            if latest_complete is not None:
+                failures_statement = failures_statement.where(
+                    scrape_runs.c.started_at > latest_complete["started_at"]
+                )
+            consecutive_failures = int(connection.scalar(failures_statement) or 0)
+
+        latest_complete_age_seconds = None
+        if latest_complete is not None and latest_complete["finished_at"] is not None:
+            latest_complete_age_seconds = max(
+                0,
+                int((request_time - latest_complete["finished_at"]).total_seconds()),
+            )
+        state = _operations_state(
+            latest_scheduled,
+            latest_complete_age_seconds,
+            consecutive_failures,
+            request_time,
+            settings,
+        )
+        return OperationsHealth(
+            state=state,
+            build={
+                "version": metadata.version,
+                "git_commit": metadata.git_commit,
+                "build_timestamp": metadata.build_timestamp,
+                "started_at": started_at,
+            },
+            configuration=OperationsConfiguration(
+                timezone=settings.timezone,
+                scrape_times=settings.scrape_times,
+                scrape_limit=settings.scrape_limit,
+                freshness_max_age_seconds=settings.freshness_max_age_seconds,
+                maximum_run_seconds=settings.maximum_run_seconds,
+            ),
+            latest_scheduled_run=(
+                _operations_run_from_row(latest_scheduled) if latest_scheduled is not None else None
+            ),
+            latest_complete_run=(
+                _operations_run_from_row(latest_complete) if latest_complete is not None else None
+            ),
+            latest_complete_age_seconds=latest_complete_age_seconds,
+            consecutive_failures=consecutive_failures,
         )
 
     @staticmethod
@@ -518,6 +613,42 @@ def _scrape_run_from_row(row: RowMapping) -> ScrapeRunSummary:
             "enumeration_complete": bool(row["enumeration_complete"]),
         }
     )
+
+
+def _operations_run_from_row(row: RowMapping) -> OperationsRun:
+    return OperationsRun.model_validate(
+        {
+            "run_id": str(row["id"]),
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "status": row["status"],
+            "completion_status": row["completion_status"],
+        }
+    )
+
+
+def _operations_state(
+    latest_scheduled: RowMapping | None,
+    latest_complete_age_seconds: int | None,
+    consecutive_failures: int,
+    request_time: datetime,
+    settings: OperationsSettings,
+) -> OperationsState:
+    if latest_scheduled is not None and latest_scheduled["status"] == "running":
+        age_seconds = max(
+            0,
+            int((request_time - latest_scheduled["started_at"]).total_seconds()),
+        )
+        if age_seconds > settings.maximum_run_seconds:
+            return OperationsState.STALLED
+        return OperationsState.RUNNING
+    if latest_complete_age_seconds is None:
+        return OperationsState.STARTING if latest_scheduled is None else OperationsState.DEGRADED
+    if latest_complete_age_seconds > settings.freshness_max_age_seconds:
+        return OperationsState.STALE
+    if consecutive_failures:
+        return OperationsState.DEGRADED
+    return OperationsState.HEALTHY
 
 
 def _page_info(total_items: int, page: int, page_size: int) -> PageInfo:

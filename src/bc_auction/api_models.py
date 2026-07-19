@@ -48,6 +48,15 @@ class ScrapeRunState(StrEnum):
     FAILED = "failed"
 
 
+class OperationsState(StrEnum):
+    STARTING = "starting"
+    RUNNING = "running"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    STALE = "stale"
+    STALLED = "stalled"
+
+
 class _ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -187,6 +196,39 @@ class ScrapeStatus(_TimestampedModel):
     latest_complete_age_seconds: int | None = Field(default=None, ge=0)
     active_listing_count: int = Field(default=0, ge=0)
     stale_listing_count: int = Field(default=0, ge=0)
+
+
+class RuntimeBuild(_ApiModel):
+    version: str
+    git_commit: str
+    build_timestamp: str
+    started_at: datetime
+
+
+class OperationsConfiguration(_ApiModel):
+    timezone: str
+    scrape_times: tuple[str, ...]
+    scrape_limit: int = Field(ge=1)
+    freshness_max_age_seconds: int = Field(ge=1)
+    maximum_run_seconds: int = Field(ge=1)
+
+
+class OperationsRun(_TimestampedModel):
+    run_id: str
+    started_at: datetime
+    finished_at: datetime | None = None
+    status: ScrapeRunState
+    completion_status: ScrapeRunCompletion
+
+
+class OperationsHealth(_TimestampedModel):
+    state: OperationsState
+    build: RuntimeBuild
+    configuration: OperationsConfiguration
+    latest_scheduled_run: OperationsRun | None = None
+    latest_complete_run: OperationsRun | None = None
+    latest_complete_age_seconds: int | None = Field(default=None, ge=0)
+    consecutive_failures: int = Field(ge=0)
 
 
 class ApiError(_ApiModel):

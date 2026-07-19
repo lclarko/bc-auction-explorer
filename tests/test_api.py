@@ -12,6 +12,7 @@ from bc_auction.models import AuctionDetailRecord, AuctionStatus
 from bc_auction.persistence import (
     AuctionRepository,
     ScrapeRunCounts,
+    ScrapeRunCoverage,
     ScrapeRunInput,
     ScrapeRunMetrics,
     ScrapeRunStatus,
@@ -106,8 +107,49 @@ def _finish(
             item_failures=0,
         ),
         metrics=metrics,
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=1,
+            unique_listings_enumerated=3,
+            detail_attempted=3,
+            detail_succeeded=3,
+            persistence_succeeded=3,
+            enumeration_complete=True,
+        ),
         finished_at=datetime(2026, 7, 16, 1, tzinfo=UTC),
     )
+
+
+def test_health_endpoints_report_database_and_operations_state(
+    client: TestClient,
+    repository: AuctionRepository,
+) -> None:
+    assert client.get("/health/live").json() == {"status": "ok"}
+    assert client.get("/health/ready").json() == {"status": "ok"}
+
+    initial_operations = client.get("/health/operations")
+    assert initial_operations.status_code == 200
+    assert initial_operations.json()["state"] == "starting"
+
+    run_id = _run(repository)
+    _persist(
+        repository,
+        run_id,
+        _detail(
+            "A000001",
+            "8733641",
+            title="Operations listing",
+            current_bid=Decimal("25.00"),
+            closing_at=datetime(2026, 7, 17, 10, tzinfo=UTC),
+        ),
+        observed_at=_REQUEST_TIME,
+    )
+    _finish(repository, run_id)
+
+    operations = client.get("/health/operations")
+    assert operations.status_code == 200
+    assert operations.json()["state"] == "healthy"
+    assert operations.json()["latest_complete_run"]["run_id"]
 
 
 def _persist(
