@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+if [ "$#" -eq 0 ]; then
+    set -- postgres
+fi
+
 runtime_secret_directory=/var/lib/postgresql/runtime-secrets
 mkdir -p "$runtime_secret_directory"
 chmod 700 "$runtime_secret_directory"
