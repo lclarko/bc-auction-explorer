@@ -142,7 +142,7 @@ jobs:
           export BC_AUCTION_SCRAPER_PASSWORD_FILE="$secret_dir/scraper_password"
           export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
           if ! docker compose -f compose.production.yaml up -d --build postgres migrate api frontend proxy; then
-            docker compose -f compose.production.yaml logs migrate
+            docker compose -f compose.production.yaml logs postgres migrate
             exit 1
           fi
           for attempt in {1..30}; do

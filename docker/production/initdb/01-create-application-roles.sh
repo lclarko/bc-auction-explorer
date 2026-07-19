@@ -2,7 +2,13 @@
 set -eu
 
 read_secret() {
-    tr -d '\r\n' < "/run/secrets/$1"
+    secret_name=$1
+    secret_value=$(tr -d '\r\n' < "/run/secrets/$secret_name")
+    if [ -z "$(printf '%s' "$secret_value" | tr -d '[:space:]')" ]; then
+        echo "required secret $secret_name was blank" >&2
+        exit 1
+    fi
+    printf '%s' "$secret_value"
 }
 
 PGPASSWORD="$(read_secret postgres_admin_password)"
