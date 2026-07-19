@@ -193,6 +193,48 @@ def test_complete_runs_reconcile_absence_without_changing_source_status(
     assert missing_row == (3, "stale", AuctionStatus.OPEN.value, None)
     assert terminal_row == (0, "current", AuctionStatus.CLOSED.value)
 
+    reappearance_run = _run(repository)
+    repository.persist_reconciled_record(
+        reappearance_run,
+        convert_reconciled_record(_detail(), observed_at=datetime(2026, 7, 19, tzinfo=UTC)),
+    )
+    repository.persist_reconciled_record(
+        reappearance_run,
+        convert_reconciled_record(
+            _detail(
+                source_id=missing.source_id,
+                canonical_source_url=missing.canonical_source_url,
+                request_url=missing.canonical_source_url,
+            ),
+            observed_at=datetime(2026, 7, 19, tzinfo=UTC),
+        ),
+    )
+    repository.finish_scrape_run(
+        reappearance_run,
+        status=ScrapeRunStatus.SUCCEEDED,
+        counts=ScrapeRunCounts(0, 2, 0, 1, 0, 0),
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=1,
+            unique_listings_enumerated=2,
+            detail_attempted=2,
+            detail_succeeded=2,
+            persistence_succeeded=2,
+            enumeration_complete=True,
+        ),
+        persisted_source_ids=(present.source_id, missing.source_id),
+    )
+    with repository._engine.connect() as connection:
+        reappeared_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+                auction_items.c.first_absent_at,
+                auction_items.c.stale_at,
+            ).where(auction_items.c.source_id == missing.source_id)
+        ).one()
+    assert reappeared_row == (0, "current", None, None)
+
 
 def test_current_observation_hash_migration_uses_the_latest_scrape_run(
     repository: AuctionRepository,

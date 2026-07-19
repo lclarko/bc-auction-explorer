@@ -134,7 +134,7 @@ export function listingInventoryText(inventoryState: InventoryState | undefined)
     case "stale":
       return "Stale or unavailable.";
     default:
-      throw new Error(`Unsupported inventory state: ${inventoryState}`);
+      return "Inventory status unavailable.";
   }
 }
 

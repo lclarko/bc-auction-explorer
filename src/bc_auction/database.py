@@ -68,6 +68,32 @@ scrape_runs = Table(
         name="ck_scrape_runs_completion_status",
     ),
     CheckConstraint(
+        "expected_product_groups >= 0",
+        name="ck_scrape_runs_expected_product_groups_nonnegative",
+    ),
+    CheckConstraint(
+        "processed_product_groups >= 0",
+        name="ck_scrape_runs_processed_product_groups_nonnegative",
+    ),
+    CheckConstraint(
+        "unique_listings_enumerated >= 0",
+        name="ck_scrape_runs_unique_listings_enumerated_nonnegative",
+    ),
+    CheckConstraint(
+        "duplicate_listings_enumerated >= 0",
+        name="ck_scrape_runs_duplicate_listings_enumerated_nonnegative",
+    ),
+    CheckConstraint("detail_attempted >= 0", name="ck_scrape_runs_detail_attempted_nonnegative"),
+    CheckConstraint("detail_succeeded >= 0", name="ck_scrape_runs_detail_succeeded_nonnegative"),
+    CheckConstraint(
+        "persistence_succeeded >= 0",
+        name="ck_scrape_runs_persistence_succeeded_nonnegative",
+    ),
+    CheckConstraint(
+        "persistence_failures >= 0",
+        name="ck_scrape_runs_persistence_failures_nonnegative",
+    ),
+    CheckConstraint(
         "(status = 'running' AND finished_at IS NULL) OR "
         "(status IN ('succeeded', 'partial', 'failed') AND finished_at IS NOT NULL)",
         name="ck_scrape_runs_status_finished_at",
@@ -140,6 +166,8 @@ auction_items = Table(
         "location_normalization_status IN ('exact', 'alias', 'unknown')"
     ),
 )
+
+Index("ix_auction_items_inventory_state", auction_items.c.inventory_state)
 
 item_observations = Table(
     "item_observations",
