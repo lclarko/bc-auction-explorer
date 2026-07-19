@@ -8,10 +8,13 @@ const listing = {
   bid_count: 0,
   canonical_source_url: "https://www.bcauction.ca/open?id=ABC-123",
   closing_at: "2026-07-20T19:00:00Z",
+  complete_absence_count: 0,
   current_bid: "0.00",
   first_seen_at: "2026-07-16T19:00:00Z",
   image_urls: [],
+  inventory_state: "current" as const,
   last_changed_at: "2026-07-16T19:00:00Z",
+  last_complete_seen_at: "2026-07-16T19:00:00Z",
   last_seen_at: "2026-07-16T19:00:00Z",
   location: "Victoria",
   minimum_bid: "0.00",
@@ -29,10 +32,14 @@ const listingPage = {
 const locations = { items: [{ value: "Victoria", count: 1 }] } satisfies FacetList;
 const categories = { items: [{ value: "Office", count: 1 }] } satisfies FacetList;
 const scrapeStatus = {
+  active_listing_count: 1,
+  latest_complete_age_seconds: null,
+  latest_complete_run: null,
   latest_listing_seen_at: "2026-07-16T19:00:00Z",
   latest_run: null,
   latest_successful_run: null,
   listing_count: 1,
+  stale_listing_count: 0,
 } satisfies ScrapeStatus;
 const listingDetail = {
   ...listing,
