@@ -153,8 +153,12 @@ jobs:
           export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
           if ! docker compose -f compose.production.yaml up -d --build postgres migrate api frontend proxy; then
             postgres_container="$(docker compose -f compose.production.yaml ps -aq postgres)"
+            migrate_container="$(docker compose -f compose.production.yaml ps -aq migrate)"
             if [ -n "$postgres_container" ]; then
               docker inspect "$postgres_container"
+            fi
+            if [ -n "$migrate_container" ]; then
+              docker inspect "$migrate_container"
             fi
             docker compose -f compose.production.yaml logs postgres migrate
             exit 1
