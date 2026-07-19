@@ -4,7 +4,7 @@
     admin off
 }
 
-{$BC_AUCTION_SITE_ADDRESS:http://localhost:8080} {
+{$BC_AUCTION_SITE_ADDRESS:http://:8080} {
     encode zstd gzip
 
     @operations path /health/operations

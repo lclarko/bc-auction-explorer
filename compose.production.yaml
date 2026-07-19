@@ -155,7 +155,7 @@ services:
       context: ./docker/proxy
       dockerfile: Dockerfile
     environment:
-      BC_AUCTION_SITE_ADDRESS: ${BC_AUCTION_SITE_ADDRESS:-http://localhost:8080}
+      BC_AUCTION_SITE_ADDRESS: ${BC_AUCTION_SITE_ADDRESS:-http://:8080}
     depends_on:
       api:
         condition: service_healthy
