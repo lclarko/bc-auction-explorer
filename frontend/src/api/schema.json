@@ -634,6 +634,157 @@
         "title": "LocationStatus",
         "type": "string"
       },
+      "OperationsConfiguration": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness_max_age_seconds": {
+            "minimum": 1.0,
+            "title": "Freshness Max Age Seconds",
+            "type": "integer"
+          },
+          "maximum_run_seconds": {
+            "minimum": 1.0,
+            "title": "Maximum Run Seconds",
+            "type": "integer"
+          },
+          "scrape_limit": {
+            "minimum": 1.0,
+            "title": "Scrape Limit",
+            "type": "integer"
+          },
+          "scrape_times": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scrape Times",
+            "type": "array"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "timezone",
+          "scrape_times",
+          "scrape_limit",
+          "freshness_max_age_seconds",
+          "maximum_run_seconds"
+        ],
+        "title": "OperationsConfiguration",
+        "type": "object"
+      },
+      "OperationsHealth": {
+        "additionalProperties": false,
+        "properties": {
+          "build": {
+            "$ref": "#/components/schemas/RuntimeBuild"
+          },
+          "configuration": {
+            "$ref": "#/components/schemas/OperationsConfiguration"
+          },
+          "consecutive_failures": {
+            "minimum": 0.0,
+            "title": "Consecutive Failures",
+            "type": "integer"
+          },
+          "latest_complete_age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Complete Age Seconds"
+          },
+          "latest_complete_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationsRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "latest_scheduled_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OperationsRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationsState"
+          }
+        },
+        "required": [
+          "state",
+          "build",
+          "configuration",
+          "consecutive_failures"
+        ],
+        "title": "OperationsHealth",
+        "type": "object"
+      },
+      "OperationsRun": {
+        "additionalProperties": false,
+        "properties": {
+          "completion_status": {
+            "$ref": "#/components/schemas/ScrapeRunCompletion"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ScrapeRunState"
+          }
+        },
+        "required": [
+          "run_id",
+          "started_at",
+          "status",
+          "completion_status"
+        ],
+        "title": "OperationsRun",
+        "type": "object"
+      },
+      "OperationsState": {
+        "enum": [
+          "starting",
+          "running",
+          "healthy",
+          "degraded",
+          "stale",
+          "stalled"
+        ],
+        "title": "OperationsState",
+        "type": "string"
+      },
       "PageInfo": {
         "additionalProperties": false,
         "properties": {
@@ -665,6 +816,36 @@
           "total_pages"
         ],
         "title": "PageInfo",
+        "type": "object"
+      },
+      "RuntimeBuild": {
+        "additionalProperties": false,
+        "properties": {
+          "build_timestamp": {
+            "title": "Build Timestamp",
+            "type": "string"
+          },
+          "git_commit": {
+            "title": "Git Commit",
+            "type": "string"
+          },
+          "started_at": {
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "git_commit",
+          "build_timestamp",
+          "started_at"
+        ],
+        "title": "RuntimeBuild",
         "type": "object"
       },
       "ScrapeRunCompletion": {
@@ -1386,6 +1567,88 @@
           }
         },
         "summary": "Scrape Status"
+      }
+    },
+    "/health/live": {
+      "get": {
+        "operationId": "live_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Live Health Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Live"
+      }
+    },
+    "/health/operations": {
+      "get": {
+        "operationId": "operations_health_operations_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationsHealth"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Operations"
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "ready_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Ready Health Ready Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ready"
       }
     }
   }

@@ -114,6 +114,18 @@ def test_manual_scrape_prints_redacted_structured_output(monkeypatch, capsys) ->
     assert "request_url" not in output["records"][0]
 
 
+def test_summary_only_scrape_omits_listing_records(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(cli, "AuctionClient", _SuccessfulClient)
+
+    exit_code = cli.main(["scrape", "--limit", "1", "--summary-only"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["summary"]["record_count"] == 1
+    assert "records" not in output
+    assert "failures" not in output
+
+
 def test_manual_scrape_supports_results_only_keyword_and_sort(monkeypatch, capsys) -> None:
     class ResultsOnlyClient(_SuccessfulClient):
         requested_search: tuple[str, str] | None = None
@@ -272,7 +284,10 @@ def test_persist_creates_and_finishes_a_successful_scrape_run(monkeypatch, capsy
     captured = capsys.readouterr()
     output = json.loads(captured.out)
     assert exit_code == 0
-    assert output["persistence"] == {"scrape_run_id": str(repository.run_id)}
+    assert output["persistence"] == {
+        "scrape_run_id": str(repository.run_id),
+        "completion_status": "incomplete",
+    }
     assert repository.started is True
     assert repository.finished[0][0] is ScrapeRunStatus.SUCCEEDED
     assert repository.finished[0][1].observations_created == 1

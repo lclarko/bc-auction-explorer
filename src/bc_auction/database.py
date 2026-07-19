@@ -1,4 +1,7 @@
+import os
+from collections.abc import Mapping
 from datetime import datetime
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import (
@@ -20,7 +23,8 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.engine import URL, Engine, make_url
+from sqlalchemy.exc import ArgumentError
 
 metadata = MetaData()
 
@@ -222,11 +226,70 @@ class DatabaseConfigurationError(ValueError):
     pass
 
 
+def resolve_database_url(
+    database_url: str | None = None,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Resolve a PostgreSQL URL from a direct URL or production secret-file settings."""
+
+    environment = os.environ if environ is None else environ
+    direct_url = database_url or environment.get("BC_AUCTION_DATABASE_URL")
+    if direct_url:
+        _require_postgres_url(direct_url)
+        return direct_url
+
+    keys = {
+        "host": "BC_AUCTION_DATABASE_HOST",
+        "database": "BC_AUCTION_DATABASE_NAME",
+        "user": "BC_AUCTION_DATABASE_USER",
+        "password_file": "BC_AUCTION_DATABASE_PASSWORD_FILE",
+    }
+    values = {name: environment.get(key) for name, key in keys.items()}
+    if not any(values.values()):
+        raise DatabaseConfigurationError(
+            "BC_AUCTION_DATABASE_URL or database component settings are required"
+        )
+    missing = [key for name, key in keys.items() if not values[name]]
+    if missing:
+        raise DatabaseConfigurationError("database component settings are incomplete")
+
+    password_path = Path(str(values["password_file"]))
+    try:
+        password = password_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise DatabaseConfigurationError("database password file could not be read") from exc
+    if not password:
+        raise DatabaseConfigurationError("database password file was empty")
+    port_value = environment.get("BC_AUCTION_DATABASE_PORT", "5432")
+    try:
+        port = int(port_value)
+    except ValueError as exc:
+        raise DatabaseConfigurationError("database port must be an integer") from exc
+    if not 1 <= port <= 65535:
+        raise DatabaseConfigurationError("database port was outside the valid range")
+    return URL.create(
+        "postgresql+psycopg",
+        username=str(values["user"]),
+        password=password,
+        host=str(values["host"]),
+        port=port,
+        database=str(values["database"]),
+    ).render_as_string(hide_password=False)
+
+
 def create_postgres_engine(database_url: str) -> Engine:
-    url = make_url(database_url)
-    if url.get_backend_name() != "postgresql":
-        raise DatabaseConfigurationError("database URL must use PostgreSQL")
-    return create_engine(url, pool_pre_ping=True)
+    _require_postgres_url(database_url)
+    return create_engine(database_url, pool_pre_ping=True)
+
+
+def _require_postgres_url(database_url: str) -> None:
+    try:
+        url = make_url(database_url)
+    except ArgumentError as exc:
+        raise DatabaseConfigurationError("database URL was invalid") from exc
+    if url.get_backend_name() != "postgresql" or url.get_driver_name() != "psycopg":
+        raise DatabaseConfigurationError("database URL must use PostgreSQL psycopg")
 
 
 def utc_now() -> datetime:

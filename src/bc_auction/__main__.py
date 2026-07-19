@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import sys
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -42,6 +43,10 @@ _SESSION_ID = re.compile(r"(?i)(sessionID=)[^&\s'\"<>]+")
 _MAX_SEARCH_PAGES = 100
 _ScrapeRecord = SearchResultRecord | AuctionDetailRecord
 _PARSER_VERSION = "ms2-v1"
+
+
+class _ScrapeInterrupted(Exception):
+    """Raised when a container stop request interrupts a persisted scrape."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,6 +447,8 @@ def _build_parser() -> argparse.ArgumentParser:
     scrape_command.add_argument("--sort", dest="display_order", default="EndingFirst")
     scrape_command.add_argument("--persist", action="store_true")
     scrape_command.add_argument("--database-url")
+    scrape_command.add_argument("--summary-only", action="store_true")
+    scrape_command.add_argument("--run-mode", choices=("detail", "scheduled"), default="detail")
     return parser
 
 
@@ -487,6 +494,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     metrics: ScrapeRunMetrics | None = None
     progress = _create_progress_reporter(sys.stderr)
     run_finished = False
+    previous_sigterm_handler = signal.getsignal(signal.SIGTERM)
+
+    def interrupt(_: int, __: object) -> None:
+        raise _ScrapeInterrupted("scrape interrupted")
+
+    signal.signal(signal.SIGTERM, interrupt)
     try:
         if args.persist and args.results_only:
             raise ValueError("--persist cannot be combined with --results-only")
@@ -544,7 +557,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 persisted_source_ids=[record.source_id for record in records],
             )
             run_finished = True
-        output = {
+        output: dict[str, object] = {
             "summary": {
                 "requested_limit": args.limit,
                 "results_only": args.results_only,
@@ -553,13 +566,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "record_count": len(records),
                 "failure_count": len(failures),
             },
-            "records": [record.model_dump(mode="json") for record in records],
-            "failures": failures,
         }
+        if not args.summary_only:
+            output["records"] = [record.model_dump(mode="json") for record in records]
+            output["failures"] = failures
         if run_id is not None:
-            output["persistence"] = {"scrape_run_id": str(run_id)}
+            output["persistence"] = {
+                "scrape_run_id": str(run_id),
+                "completion_status": coverage.completion_status.value if coverage else "pending",
+            }
         _write_output(args.output, output)
-    except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
+    except (OSError, ScraperError, httpx.HTTPError, ValueError, _ScrapeInterrupted) as exc:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if progress is not None:
             progress.close()
         _report_failed_run_finalization(
@@ -568,6 +586,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if progress is not None:
             progress.close()
         _report_failed_run_finalization(
@@ -576,6 +595,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
         if progress is not None:
             progress.close()
         if engine is not None:
@@ -588,12 +608,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _open_repository(database_url: str | None) -> tuple[AuctionRepository, Engine]:
-    from bc_auction.database import create_postgres_engine
+    from bc_auction.database import (
+        DatabaseConfigurationError,
+        create_postgres_engine,
+        resolve_database_url,
+    )
     from bc_auction.persistence import AuctionRepository
 
-    resolved_url = database_url or os.environ.get("BC_AUCTION_DATABASE_URL")
-    if not resolved_url:
-        raise ValueError("persistence requires --database-url or BC_AUCTION_DATABASE_URL")
+    try:
+        resolved_url = resolve_database_url(database_url)
+    except DatabaseConfigurationError as exc:
+        raise ValueError(
+            "persistence requires --database-url or BC_AUCTION_DATABASE_URL"
+        ) from exc
     engine = create_postgres_engine(resolved_url)
     return AuctionRepository(engine), engine
 
@@ -606,6 +633,7 @@ def _scrape_run_input(args: argparse.Namespace) -> ScrapeRunInput:
         keyword=args.keyword,
         sort=args.display_order,
         parser_version=_PARSER_VERSION,
+        mode=args.run_mode,
     )
 
 

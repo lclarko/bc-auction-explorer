@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import os
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy.engine import Engine
@@ -23,10 +23,16 @@ from bc_auction.api_models import (
     ListingPage,
     ListingSort,
     ListingView,
+    OperationsHealth,
     ScrapeStatus,
 )
-from bc_auction.database import DatabaseConfigurationError, create_postgres_engine
+from bc_auction.database import (
+    DatabaseConfigurationError,
+    create_postgres_engine,
+    resolve_database_url,
+)
 from bc_auction.read_repository import AuctionReadRepository, ListingFilters
+from bc_auction.runtime import OperationsSettings, RuntimeMetadata, configure_logging
 
 _DEFAULT_PAGE_SIZE = 25
 _MAX_PAGE_SIZE = 100
@@ -34,6 +40,7 @@ _DEFAULT_FACET_LIMIT = 100
 _MAX_FACET_LIMIT = 500
 _MAX_PAGE = 10_000
 _MAX_BID_VALUE = Decimal("999999999999.99")
+_LOGGER = logging.getLogger(__name__)
 
 
 def _utc_now() -> datetime:
@@ -48,6 +55,10 @@ def create_app(
 ) -> FastAPI:
     """Create the API application without granting any write capability."""
 
+    runtime_metadata = RuntimeMetadata.from_environment()
+    operations_settings = OperationsSettings.from_environment()
+    configure_logging()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         owns_engine = engine is None
@@ -58,12 +69,16 @@ def create_app(
                     _resolve_database_url(database_url)
                 )
             repository = AuctionReadRepository(resolved_engine)
-            repository.ping()
             app.state.read_repository = repository
+            app.state.started_at = _provided_utc_now(now_provider)
+            app.state.runtime_metadata = runtime_metadata
+            app.state.operations_settings = operations_settings
+            _LOGGER.info("api_started")
             yield
         except (DatabaseConfigurationError, SQLAlchemyError) as exc:
-            raise RuntimeError("database is unavailable") from exc
+            raise RuntimeError("database configuration is unavailable") from exc
         finally:
+            _LOGGER.info("api_stopped")
             if owns_engine and resolved_engine is not None:
                 resolved_engine.dispose()
 
@@ -77,6 +92,34 @@ def create_app(
     app.add_exception_handler(StarletteHTTPException, _http_exception)
     app.add_exception_handler(SQLAlchemyError, _database_error)
     app.add_exception_handler(Exception, _unexpected_error)
+
+    @app.get("/health/live")
+    def live() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/health/ready", responses={503: {"model": ErrorResponse}})
+    def ready(
+        repository: Annotated[AuctionReadRepository, Depends(_read_repository)],
+    ) -> dict[str, str]:
+        repository.ping()
+        return {"status": "ok"}
+
+    @app.get("/health/operations", responses={503: {"model": ErrorResponse}})
+    def operations(
+        response: Response,
+        repository: Annotated[AuctionReadRepository, Depends(_read_repository)],
+        request: Request,
+    ) -> OperationsHealth:
+        settings = _operations_settings(request)
+        status = repository.operations_status(
+            request_time=_provided_utc_now(now_provider),
+            started_at=_started_at(request),
+            metadata=_runtime_metadata(request),
+            settings=settings,
+        )
+        if status.state.value in {"stale", "stalled"}:
+            response.status_code = 503
+        return status
 
     @app.get(
         "/api/listings",
@@ -198,10 +241,7 @@ def create_app(
 
 
 def _resolve_database_url(database_url: str | None) -> str:
-    resolved_url = database_url or os.environ.get("BC_AUCTION_DATABASE_URL")
-    if not resolved_url:
-        raise DatabaseConfigurationError("BC_AUCTION_DATABASE_URL is required")
-    return resolved_url
+    return resolve_database_url(database_url)
 
 
 def _read_repository(request: Request) -> AuctionReadRepository:
@@ -209,6 +249,27 @@ def _read_repository(request: Request) -> AuctionReadRepository:
     if not isinstance(repository, AuctionReadRepository):
         raise RuntimeError("read repository is not available")
     return repository
+
+
+def _runtime_metadata(request: Request) -> RuntimeMetadata:
+    metadata = getattr(request.app.state, "runtime_metadata", None)
+    if not isinstance(metadata, RuntimeMetadata):
+        raise RuntimeError("runtime metadata is not available")
+    return metadata
+
+
+def _operations_settings(request: Request) -> OperationsSettings:
+    settings = getattr(request.app.state, "operations_settings", None)
+    if not isinstance(settings, OperationsSettings):
+        raise RuntimeError("operations settings are not available")
+    return settings
+
+
+def _started_at(request: Request) -> datetime:
+    started_at = getattr(request.app.state, "started_at", None)
+    if not isinstance(started_at, datetime):
+        raise RuntimeError("application start time is not available")
+    return started_at
 
 
 def _provided_utc_now(now_provider: Callable[[], datetime]) -> datetime:

@@ -42,6 +42,8 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e '.[dev]'
+      - run: python -m pip install uv==0.11.29
+      - run: uv lock --check
       - run: psql -h localhost -U bc_auction -d bc_auction -c 'CREATE DATABASE bc_auction_test'
       - run: alembic upgrade head
       - run: pytest
@@ -100,3 +102,113 @@ jobs:
           path: frontend/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  containers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Validate production Compose and image definitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir="$(mktemp -d)"
+          for secret_name in postgres_admin_password migration_password scraper_password api_password; do
+            printf 'ci-only-%s\n' "$secret_name" > "$secret_dir/$secret_name"
+            chmod 600 "$secret_dir/$secret_name"
+            sudo chown root:root "$secret_dir/$secret_name"
+          done
+          export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
+          export BC_AUCTION_MIGRATION_PASSWORD_FILE="$secret_dir/migration_password"
+          export BC_AUCTION_SCRAPER_PASSWORD_FILE="$secret_dir/scraper_password"
+          export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
+          docker compose -f compose.production.yaml config --quiet
+          docker buildx build --platform linux/amd64,linux/arm64 --target api \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-api.tar" -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 --target migrate \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-migrate.tar" -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 --target operations \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-operations.tar" -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-frontend.tar" -f frontend/Dockerfile frontend
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-proxy.tar" -f docker/proxy/Dockerfile docker/proxy
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-postgres.tar" -f docker/production/postgres.Dockerfile docker/production
+      - name: Smoke test production API and frontend without source requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          secret_dir="$(mktemp -d)"
+          trap 'docker compose -f compose.production.yaml down -v' EXIT
+          for secret_name in postgres_admin_password migration_password scraper_password api_password; do
+            printf 'ci-only-%s\n' "$secret_name" > "$secret_dir/$secret_name"
+            chmod 600 "$secret_dir/$secret_name"
+            sudo chown root:root "$secret_dir/$secret_name"
+          done
+          export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
+          export BC_AUCTION_MIGRATION_PASSWORD_FILE="$secret_dir/migration_password"
+          export BC_AUCTION_SCRAPER_PASSWORD_FILE="$secret_dir/scraper_password"
+          export BC_AUCTION_API_PASSWORD_FILE="$secret_dir/api_password"
+          if ! docker compose -f compose.production.yaml up -d --build postgres migrate api frontend proxy; then
+            postgres_container="$(docker compose -f compose.production.yaml ps -aq postgres)"
+            migrate_container="$(docker compose -f compose.production.yaml ps -aq migrate)"
+            if [ -n "$postgres_container" ]; then
+              docker inspect "$postgres_container"
+            fi
+            if [ -n "$migrate_container" ]; then
+              docker inspect "$migrate_container"
+            fi
+            docker compose -f compose.production.yaml logs postgres migrate
+            exit 1
+          fi
+          for attempt in {1..30}; do
+            if curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/health/ready; then
+              break
+            fi
+            sleep 2
+          done
+          if ! curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/health/ready; then
+            docker compose -f compose.production.yaml ps -a
+            docker compose -f compose.production.yaml logs proxy api frontend
+            exit 1
+          fi
+          curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/
+          pid_one_uid() {
+            docker compose -f compose.production.yaml exec -T "$1" \
+              sh -c "awk '/^Uid:/{print \$2}' /proc/1/status"
+          }
+          api_uid="$(pid_one_uid api)"
+          proxy_uid="$(pid_one_uid proxy)"
+          proxy_file_capabilities="$(docker compose -f compose.production.yaml exec -T proxy getcap /usr/bin/caddy)"
+          postgres_container="$(docker compose -f compose.production.yaml ps -q postgres)"
+          published_postgres_ports="$(
+            docker inspect \
+              --format '{{range $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{println .HostPort}}{{end}}{{end}}' \
+              "$postgres_container"
+          )"
+          if [ "$api_uid" != "10001" ]; then
+            echo "api PID 1 is running as unexpected UID: $api_uid" >&2
+            exit 1
+          fi
+          if [ "$proxy_uid" != "10001" ]; then
+            echo "proxy PID 1 is running as unexpected UID: $proxy_uid" >&2
+            exit 1
+          fi
+          if [ -n "$proxy_file_capabilities" ]; then
+            echo "proxy binary retains unexpected file capabilities: $proxy_file_capabilities" >&2
+            exit 1
+          fi
+          if [ -n "$published_postgres_ports" ]; then
+            echo "postgres unexpectedly publishes host ports: $published_postgres_ports" >&2
+            exit 1
+          fi
+          backup_dir="$RUNNER_TEMP/bc-auction-backups"
+          mkdir -p "$backup_dir"
+          scripts/backup-db.sh "$backup_dir"
+          archive="$(find "$backup_dir" -name '*.dump' -print -quit)"
+          test -n "$archive"
+          BC_AUCTION_RESTORE_SERVICES="api proxy" scripts/restore-db.sh --replace "$archive"
