@@ -8,6 +8,7 @@ fi
 runtime_secret_directory=/var/lib/postgresql/runtime-secrets
 mkdir -p "$runtime_secret_directory"
 chmod 700 "$runtime_secret_directory"
+chown postgres:postgres "$runtime_secret_directory"
 
 for secret_name in postgres_admin_password migration_password scraper_password api_password; do
     runtime_secret="$runtime_secret_directory/$secret_name"

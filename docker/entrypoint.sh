@@ -4,6 +4,7 @@ set -eu
 runtime_secret_directory=/tmp/bc-auction-secrets
 mkdir -p "$runtime_secret_directory"
 chmod 700 "$runtime_secret_directory"
+chown bcauction:bcauction "$runtime_secret_directory"
 
 if [ -n "${BC_AUCTION_DATABASE_PASSWORD_FILE:-}" ]; then
     runtime_password_file="$runtime_secret_directory/database_password"

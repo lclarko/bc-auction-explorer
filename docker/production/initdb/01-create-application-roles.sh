@@ -19,10 +19,10 @@ BC_AUCTION_API_PASSWORD="$(read_secret api_password)"
 export PGPASSWORD BC_AUCTION_MIGRATION_PASSWORD BC_AUCTION_SCRAPER_PASSWORD BC_AUCTION_API_PASSWORD
 
 psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set ON_ERROR_STOP=1 \
-    --set database_name="$POSTGRES_DB" \
-    --set migration_password="$BC_AUCTION_MIGRATION_PASSWORD" \
-    --set scraper_password="$BC_AUCTION_SCRAPER_PASSWORD" \
-    --set api_password="$BC_AUCTION_API_PASSWORD" <<'SQL'
+    --set database_name="$POSTGRES_DB" <<'SQL'
+\getenv migration_password BC_AUCTION_MIGRATION_PASSWORD
+\getenv scraper_password BC_AUCTION_SCRAPER_PASSWORD
+\getenv api_password BC_AUCTION_API_PASSWORD
 CREATE ROLE bc_auction_migration LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
     PASSWORD :'migration_password';
 CREATE ROLE bc_auction_scraper LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT

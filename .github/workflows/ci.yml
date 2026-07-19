@@ -117,7 +117,7 @@ jobs:
           set -euo pipefail
           secret_dir="$(mktemp -d)"
           for secret_name in postgres_admin_password migration_password scraper_password api_password; do
-            printf 'ci-only-password\n' > "$secret_dir/$secret_name"
+            printf 'ci-only-%s\n' "$secret_name" > "$secret_dir/$secret_name"
             chmod 600 "$secret_dir/$secret_name"
           done
           export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
@@ -127,10 +127,16 @@ jobs:
           docker compose -f compose.production.yaml config --quiet
           docker buildx build --platform linux/amd64,linux/arm64 --target api \
             --output type=oci,dest="$RUNNER_TEMP/bc-auction-api.tar" -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 --target migrate \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-migrate.tar" -f docker/Dockerfile .
+          docker buildx build --platform linux/amd64,linux/arm64 --target operations \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-operations.tar" -f docker/Dockerfile .
           docker buildx build --platform linux/amd64,linux/arm64 \
             --output type=oci,dest="$RUNNER_TEMP/bc-auction-frontend.tar" -f frontend/Dockerfile frontend
           docker buildx build --platform linux/amd64,linux/arm64 \
             --output type=oci,dest="$RUNNER_TEMP/bc-auction-proxy.tar" -f docker/proxy/Dockerfile docker/proxy
+          docker buildx build --platform linux/amd64,linux/arm64 \
+            --output type=oci,dest="$RUNNER_TEMP/bc-auction-postgres.tar" -f docker/production/postgres.Dockerfile docker/production
       - name: Smoke test production API and frontend without source requests
         shell: bash
         run: |
@@ -138,7 +144,7 @@ jobs:
           secret_dir="$(mktemp -d)"
           trap 'docker compose -f compose.production.yaml down -v' EXIT
           for secret_name in postgres_admin_password migration_password scraper_password api_password; do
-            printf 'ci-only-password\n' > "$secret_dir/$secret_name"
+            printf 'ci-only-%s\n' "$secret_name" > "$secret_dir/$secret_name"
             chmod 600 "$secret_dir/$secret_name"
           done
           export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
@@ -154,13 +160,13 @@ jobs:
             exit 1
           fi
           for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8080/health/ready; then
+            if curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/health/ready; then
               break
             fi
             sleep 2
           done
-          curl --fail --silent http://127.0.0.1:8080/health/ready
-          curl --fail --silent http://127.0.0.1:8080/
+          curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/health/ready
+          curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/
           test "$(docker compose -f compose.production.yaml exec -T api id -u)" = "10001"
           test "$(docker compose -f compose.production.yaml port postgres 5432 2>/dev/null || true)" = ""
           backup_dir="$RUNNER_TEMP/bc-auction-backups"
