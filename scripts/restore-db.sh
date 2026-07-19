@@ -21,6 +21,14 @@ case " $restore_services " in
         exit 2
         ;;
 esac
+available_services=$($compose config --services)
+# shellcheck disable=SC2086
+for restore_service in $restore_services; do
+    if ! printf '%s\n' "$available_services" | grep -Fqx "$restore_service"; then
+        echo '{"event":"restore_failed","reason":"unknown_restore_service"}' >&2
+        exit 2
+    fi
+done
 
 if ! $compose exec -T postgres sh -ceu '
     PGPASSWORD="$(tr -d "\r\n" < /run/secrets/migration_password)"

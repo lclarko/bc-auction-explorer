@@ -4,7 +4,7 @@ set -eu
 read_secret() {
     secret_name=$1
     secret_directory=${BC_AUCTION_POSTGRES_SECRET_DIRECTORY:-/run/secrets}
-    secret_value=$(tr -d '\r\n' < "$secret_directory/$secret_name")
+    secret_value=$(sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$secret_directory/$secret_name")
     if [ -z "$(printf '%s' "$secret_value" | tr -d '[:space:]')" ]; then
         echo "required secret $secret_name was blank" >&2
         exit 1

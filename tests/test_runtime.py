@@ -9,7 +9,7 @@ from bc_auction.runtime import OperationsSettings, RuntimeConfigurationError
 
 def test_resolve_database_url_uses_password_file(tmp_path: Path) -> None:
     password_file = tmp_path / "database-password"
-    password_file.write_text("secret value\n", encoding="utf-8")
+    password_file.write_text(" secret value \n", encoding="utf-8")
 
     resolved = resolve_database_url(
         environ={
