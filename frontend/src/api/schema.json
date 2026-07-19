@@ -90,6 +90,15 @@
         "title": "FacetList",
         "type": "object"
       },
+      "InventoryState": {
+        "enum": [
+          "current",
+          "not_observed",
+          "stale"
+        ],
+        "title": "InventoryState",
+        "type": "string"
+      },
       "ListingAvailability": {
         "enum": [
           "active",
@@ -180,6 +189,12 @@
             ],
             "title": "Closing At"
           },
+          "complete_absence_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Complete Absence Count",
+            "type": "integer"
+          },
           "current_bid": {
             "anyOf": [
               {
@@ -216,10 +231,26 @@
             "title": "Image Urls",
             "type": "array"
           },
+          "inventory_state": {
+            "$ref": "#/components/schemas/InventoryState",
+            "default": "current"
+          },
           "last_changed_at": {
             "format": "date-time",
             "title": "Last Changed At",
             "type": "string"
+          },
+          "last_complete_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Complete Seen At"
           },
           "last_seen_at": {
             "format": "date-time",
@@ -449,6 +480,12 @@
             ],
             "title": "Closing At"
           },
+          "complete_absence_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Complete Absence Count",
+            "type": "integer"
+          },
           "current_bid": {
             "anyOf": [
               {
@@ -474,10 +511,26 @@
             "title": "Image Urls",
             "type": "array"
           },
+          "inventory_state": {
+            "$ref": "#/components/schemas/InventoryState",
+            "default": "current"
+          },
           "last_changed_at": {
             "format": "date-time",
             "title": "Last Changed At",
             "type": "string"
+          },
+          "last_complete_seen_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Complete Seen At"
           },
           "last_seen_at": {
             "format": "date-time",
@@ -614,6 +667,15 @@
         "title": "PageInfo",
         "type": "object"
       },
+      "ScrapeRunCompletion": {
+        "enum": [
+          "pending",
+          "complete",
+          "incomplete"
+        ],
+        "title": "ScrapeRunCompletion",
+        "type": "string"
+      },
       "ScrapeRunState": {
         "enum": [
           "running",
@@ -627,6 +689,39 @@
       "ScrapeRunSummary": {
         "additionalProperties": false,
         "properties": {
+          "completion_status": {
+            "$ref": "#/components/schemas/ScrapeRunCompletion",
+            "default": "pending"
+          },
+          "detail_attempted": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Detail Attempted",
+            "type": "integer"
+          },
+          "detail_succeeded": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Detail Succeeded",
+            "type": "integer"
+          },
+          "duplicate_listings_enumerated": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Duplicate Listings Enumerated",
+            "type": "integer"
+          },
+          "enumeration_complete": {
+            "default": false,
+            "title": "Enumeration Complete",
+            "type": "boolean"
+          },
+          "expected_product_groups": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Expected Product Groups",
+            "type": "integer"
+          },
           "finished_at": {
             "anyOf": [
               {
@@ -671,6 +766,24 @@
           "pages_visited": {
             "minimum": 0.0,
             "title": "Pages Visited",
+            "type": "integer"
+          },
+          "persistence_failures": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Persistence Failures",
+            "type": "integer"
+          },
+          "persistence_succeeded": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Persistence Succeeded",
+            "type": "integer"
+          },
+          "processed_product_groups": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Processed Product Groups",
             "type": "integer"
           },
           "rate_limit_responses": {
@@ -725,6 +838,12 @@
           },
           "status": {
             "$ref": "#/components/schemas/ScrapeRunState"
+          },
+          "unique_listings_enumerated": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Unique Listings Enumerated",
+            "type": "integer"
           }
         },
         "required": [
@@ -753,6 +872,34 @@
       "ScrapeStatus": {
         "additionalProperties": false,
         "properties": {
+          "active_listing_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Active Listing Count",
+            "type": "integer"
+          },
+          "latest_complete_age_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Complete Age Seconds"
+          },
+          "latest_complete_run": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScrapeRunSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "latest_listing_seen_at": {
             "anyOf": [
               {
@@ -788,6 +935,12 @@
           "listing_count": {
             "minimum": 0.0,
             "title": "Listing Count",
+            "type": "integer"
+          },
+          "stale_listing_count": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Stale Listing Count",
             "type": "integer"
           }
         },

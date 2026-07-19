@@ -7,7 +7,7 @@ import { getListing } from "../api/client";
 import { ImageGallery } from "../components/ImageGallery";
 import { StatusBadge } from "../components/StatusBadge";
 import { bidCount, currency } from "../lib/format";
-import { listingLifecycleText, pacificDateTime, useLifecycleClock } from "../lib/time";
+import { listingInventoryText, listingLifecycleText, pacificDateTime, useLifecycleClock } from "../lib/time";
 import { isListingNotFound } from "./ListingBrowserPage";
 
 function detailErrorMessage(error: unknown): string {
@@ -71,6 +71,7 @@ export function ListingDetailPage() {
   const lifecycleText = item.availability
     ? listingLifecycleText(item.availability, item.status, item.closing_at, item.last_seen_at, now)
     : null;
+  const inventoryText = listingInventoryText(item.inventory_state);
 
   return (
     <article className="listing-detail">
@@ -84,6 +85,7 @@ export function ListingDetailPage() {
         </div>
         <StatusBadge status={item.status} />
       </header>
+      {inventoryText ? <p className="closing-passed">{inventoryText}</p> : null}
       <div className="detail-layout">
         <div className="detail-image-wrap">
           <ImageGallery imageUrls={item.image_urls} title={item.title} />

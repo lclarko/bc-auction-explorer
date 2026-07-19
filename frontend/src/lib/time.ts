@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { TZDate } from "@date-fns/tz";
 
-import type { AuctionStatus, ListingAvailability } from "../api/client";
+import type { AuctionStatus, InventoryState, ListingAvailability } from "../api/client";
 
 export const PACIFIC_TIME_ZONE = "America/Vancouver";
 
@@ -121,6 +121,20 @@ export function listingLifecycleText(
       return sourceStatus === "open" ? "Closing time unavailable." : null;
     default:
       return unsupportedAvailability(availability);
+  }
+}
+
+export function listingInventoryText(inventoryState: InventoryState | undefined): string | null {
+  switch (inventoryState) {
+    case undefined:
+    case "current":
+      return null;
+    case "not_observed":
+      return "Not found in the latest complete refresh.";
+    case "stale":
+      return "Stale or unavailable.";
+    default:
+      return "Inventory status unavailable.";
   }
 }
 

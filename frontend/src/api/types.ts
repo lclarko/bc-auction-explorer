@@ -119,6 +119,11 @@ export type components = {
             items: components["schemas"]["Facet"][];
         };
         /**
+         * InventoryState
+         * @enum {string}
+         */
+        InventoryState: "current" | "not_observed" | "stale";
+        /**
          * ListingAvailability
          * @enum {string}
          */
@@ -140,6 +145,11 @@ export type components = {
             closed_at?: string | null;
             /** Closing At */
             closing_at?: string | null;
+            /**
+             * Complete Absence Count
+             * @default 0
+             */
+            complete_absence_count: number;
             /** Current Bid */
             current_bid?: string | null;
             /** Description */
@@ -154,11 +164,15 @@ export type components = {
              * @default []
              */
             image_urls: string[];
+            /** @default current */
+            inventory_state: components["schemas"]["InventoryState"];
             /**
              * Last Changed At
              * Format: date-time
              */
             last_changed_at: string;
+            /** Last Complete Seen At */
+            last_complete_seen_at?: string | null;
             /**
              * Last Seen At
              * Format: date-time
@@ -216,6 +230,11 @@ export type components = {
             closed_at?: string | null;
             /** Closing At */
             closing_at?: string | null;
+            /**
+             * Complete Absence Count
+             * @default 0
+             */
+            complete_absence_count: number;
             /** Current Bid */
             current_bid?: string | null;
             /**
@@ -228,11 +247,15 @@ export type components = {
              * @default []
              */
             image_urls: string[];
+            /** @default current */
+            inventory_state: components["schemas"]["InventoryState"];
             /**
              * Last Changed At
              * Format: date-time
              */
             last_changed_at: string;
+            /** Last Complete Seen At */
+            last_complete_seen_at?: string | null;
             /**
              * Last Seen At
              * Format: date-time
@@ -279,12 +302,44 @@ export type components = {
             total_pages: number;
         };
         /**
+         * ScrapeRunCompletion
+         * @enum {string}
+         */
+        ScrapeRunCompletion: "pending" | "complete" | "incomplete";
+        /**
          * ScrapeRunState
          * @enum {string}
          */
         ScrapeRunState: "running" | "succeeded" | "partial" | "failed";
         /** ScrapeRunSummary */
         ScrapeRunSummary: {
+            /** @default pending */
+            completion_status: components["schemas"]["ScrapeRunCompletion"];
+            /**
+             * Detail Attempted
+             * @default 0
+             */
+            detail_attempted: number;
+            /**
+             * Detail Succeeded
+             * @default 0
+             */
+            detail_succeeded: number;
+            /**
+             * Duplicate Listings Enumerated
+             * @default 0
+             */
+            duplicate_listings_enumerated: number;
+            /**
+             * Enumeration Complete
+             * @default false
+             */
+            enumeration_complete: boolean;
+            /**
+             * Expected Product Groups
+             * @default 0
+             */
+            expected_product_groups: number;
             /** Finished At */
             finished_at?: string | null;
             /** Item Failures */
@@ -301,6 +356,21 @@ export type components = {
             observations_created: number;
             /** Pages Visited */
             pages_visited: number;
+            /**
+             * Persistence Failures
+             * @default 0
+             */
+            persistence_failures: number;
+            /**
+             * Persistence Succeeded
+             * @default 0
+             */
+            persistence_succeeded: number;
+            /**
+             * Processed Product Groups
+             * @default 0
+             */
+            processed_product_groups: number;
             /** Rate Limit Responses */
             rate_limit_responses: number;
             /** Requested Limit */
@@ -325,15 +395,33 @@ export type components = {
              */
             started_at: string;
             status: components["schemas"]["ScrapeRunState"];
+            /**
+             * Unique Listings Enumerated
+             * @default 0
+             */
+            unique_listings_enumerated: number;
         };
         /** ScrapeStatus */
         ScrapeStatus: {
+            /**
+             * Active Listing Count
+             * @default 0
+             */
+            active_listing_count: number;
+            /** Latest Complete Age Seconds */
+            latest_complete_age_seconds?: number | null;
+            latest_complete_run?: components["schemas"]["ScrapeRunSummary"] | null;
             /** Latest Listing Seen At */
             latest_listing_seen_at?: string | null;
             latest_run?: components["schemas"]["ScrapeRunSummary"] | null;
             latest_successful_run?: components["schemas"]["ScrapeRunSummary"] | null;
             /** Listing Count */
             listing_count: number;
+            /**
+             * Stale Listing Count
+             * @default 0
+             */
+            stale_listing_count: number;
         };
     };
     responses: never;

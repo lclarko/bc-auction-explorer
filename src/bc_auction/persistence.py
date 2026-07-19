@@ -1,5 +1,6 @@
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -8,7 +9,7 @@ from typing import TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-from sqlalchemy import Connection, Engine, insert, select, text, update
+from sqlalchemy import Connection, Engine, and_, case, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -29,6 +30,15 @@ class ScrapeRunStatus(StrEnum):
     SUCCEEDED = "succeeded"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+class ScrapeRunCompletion(StrEnum):
+    PENDING = "pending"
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+
+
+_STALE_ABSENCE_THRESHOLD = 3
 
 
 class PersistenceError(RuntimeError):
@@ -275,6 +285,32 @@ class ScrapeRunCounts:
 
 
 @dataclass(frozen=True, slots=True)
+class ScrapeRunCoverage:
+    expected_product_groups: int = 0
+    processed_product_groups: int = 0
+    unique_listings_enumerated: int = 0
+    duplicate_listings_enumerated: int = 0
+    detail_attempted: int = 0
+    detail_succeeded: int = 0
+    persistence_succeeded: int = 0
+    persistence_failures: int = 0
+    enumeration_complete: bool = False
+
+    @property
+    def completion_status(self) -> ScrapeRunCompletion:
+        if (
+            self.enumeration_complete
+            and self.expected_product_groups == self.processed_product_groups
+            and self.detail_attempted == self.unique_listings_enumerated
+            and self.detail_succeeded == self.unique_listings_enumerated
+            and self.persistence_succeeded == self.unique_listings_enumerated
+            and self.persistence_failures == 0
+        ):
+            return ScrapeRunCompletion.COMPLETE
+        return ScrapeRunCompletion.INCOMPLETE
+
+
+@dataclass(frozen=True, slots=True)
 class ScrapeRunMetrics:
     source_requests: int = 0
     source_responses: int = 0
@@ -327,18 +363,22 @@ class AuctionRepository:
         status: ScrapeRunStatus,
         counts: ScrapeRunCounts,
         metrics: ScrapeRunMetrics | None = None,
+        coverage: ScrapeRunCoverage | None = None,
+        persisted_source_ids: Sequence[str] = (),
         error_summary: str | None = None,
         finished_at: datetime | None = None,
     ) -> None:
         if status is ScrapeRunStatus.RUNNING:
             raise ValueError("running scrape run cannot be finalized")
         final_metrics = metrics or ScrapeRunMetrics()
+        final_coverage = coverage or ScrapeRunCoverage()
+        finished_timestamp = finished_at or utc_now()
         with self._engine.begin() as connection:
             connection.execute(
                 update(scrape_runs)
                 .where(scrape_runs.c.id == run_id)
                 .values(
-                    finished_at=finished_at or utc_now(),
+                    finished_at=finished_timestamp,
                     status=status.value,
                     pages_visited=counts.pages_visited,
                     items_seen=counts.items_seen,
@@ -354,9 +394,67 @@ class AuctionRepository:
                     source_request_duration_ms=final_metrics.source_request_duration_ms,
                     source_request_wait_duration_ms=final_metrics.source_request_wait_duration_ms,
                     source_retry_wait_duration_ms=final_metrics.source_retry_wait_duration_ms,
+                    completion_status=final_coverage.completion_status.value,
+                    expected_product_groups=final_coverage.expected_product_groups,
+                    processed_product_groups=final_coverage.processed_product_groups,
+                    unique_listings_enumerated=final_coverage.unique_listings_enumerated,
+                    duplicate_listings_enumerated=final_coverage.duplicate_listings_enumerated,
+                    detail_attempted=final_coverage.detail_attempted,
+                    detail_succeeded=final_coverage.detail_succeeded,
+                    persistence_succeeded=final_coverage.persistence_succeeded,
+                    persistence_failures=final_coverage.persistence_failures,
+                    enumeration_complete=int(final_coverage.enumeration_complete),
                     error_summary=error_summary,
                 )
             )
+            if status is ScrapeRunStatus.SUCCEEDED and (
+                final_coverage.completion_status is ScrapeRunCompletion.COMPLETE
+            ):
+                self._reconcile_complete_inventory(
+                    connection,
+                    persisted_source_ids,
+                    finished_timestamp,
+                )
+
+    @staticmethod
+    def _reconcile_complete_inventory(
+        connection: Connection,
+        persisted_source_ids: Sequence[str],
+        completed_at: datetime,
+    ) -> None:
+        open_item = auction_items.c.status == AuctionStatus.OPEN.value
+        seen_condition = and_(open_item, auction_items.c.source_id.in_(tuple(persisted_source_ids)))
+        connection.execute(
+            update(auction_items)
+            .where(seen_condition)
+            .values(
+                last_complete_seen_at=completed_at,
+                complete_absence_count=0,
+                inventory_state="current",
+                first_absent_at=None,
+                stale_at=None,
+            )
+        )
+        next_absence_count = auction_items.c.complete_absence_count + 1
+        connection.execute(
+            update(auction_items)
+            .where(and_(open_item, ~auction_items.c.source_id.in_(tuple(persisted_source_ids))))
+            .values(
+                complete_absence_count=next_absence_count,
+                inventory_state=case(
+                    (next_absence_count >= _STALE_ABSENCE_THRESHOLD, "stale"),
+                    else_="not_observed",
+                ),
+                first_absent_at=func.coalesce(auction_items.c.first_absent_at, completed_at),
+                stale_at=case(
+                    (
+                        next_absence_count >= _STALE_ABSENCE_THRESHOLD,
+                        func.coalesce(auction_items.c.stale_at, completed_at),
+                    ),
+                    else_=auction_items.c.stale_at,
+                ),
+            )
+        )
 
     def persist_reconciled_record(
         self,

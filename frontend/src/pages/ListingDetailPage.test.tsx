@@ -14,11 +14,14 @@ const detail = {
   category_canonical: null,
   category_raw: "Office",
   closing_at: "2026-07-20T19:00:00Z",
+  complete_absence_count: 0,
   current_bid: "25.00",
   description: "A clean surplus chair.",
   first_seen_at: "2026-07-16T19:00:00Z",
   image_urls: [],
+  inventory_state: "current",
   last_changed_at: "2026-07-16T19:00:00Z",
+  last_complete_seen_at: "2026-07-16T19:00:00Z",
   last_seen_at: "2026-07-16T19:00:00Z",
   location: "Victoria",
   location_canonical: "Victoria",
@@ -95,5 +98,22 @@ describe("ListingDetailPage", () => {
     expect(await screen.findByRole("heading", { name: "Surplus office chair" })).toBeInTheDocument();
     expect(screen.getByText("Open", { selector: ".status-badge" })).toBeInTheDocument();
     expect(screen.getByText(/Scheduled closing time passed .* Last observed open at/)).toBeInTheDocument();
+  });
+
+  it("labels a listing absent from the latest complete refresh", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ ...detail, inventory_state: "not_observed" }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      ),
+    );
+
+    renderDetail();
+
+    expect(await screen.findByText("Not found in the latest complete refresh.")).toBeInTheDocument();
   });
 });

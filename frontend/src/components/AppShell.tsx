@@ -13,8 +13,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     staleTime: 60_000,
   });
   const latest = scrapeStatus.data?.latest_run;
-  const latestSuccess = scrapeStatus.data?.latest_successful_run;
-  const successfulAt = latestSuccess?.finished_at ?? latestSuccess?.started_at;
+  const latestComplete = scrapeStatus.data?.latest_complete_run;
+  const completedAt = latestComplete?.finished_at ?? latestComplete?.started_at;
   const latestDuration = runDuration(latest?.started_at, latest?.finished_at);
   const requestNote = latest
     ? ` ${latest.source_requests} source ${latest.source_requests === 1 ? "request" : "requests"}, ${latest.source_retries} ${latest.source_retries === 1 ? "retry" : "retries"}.`
@@ -45,7 +45,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             "Loading refresh status."
           ) : latest ? (
             <>
-              Latest run: <strong>{latest.status}</strong>. Last successful refresh: {pacificDateTime(successfulAt)}.
+              Latest run: <strong>{latest.status}</strong>. Last complete refresh: {pacificDateTime(completedAt)}.
               {latestDuration ? ` Completed in ${latestDuration}.` : ""}
               {requestNote}
               {latestRunNote}

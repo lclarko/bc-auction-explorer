@@ -20,6 +20,7 @@ from bc_auction.persistence import (
     IdentityConflictError,
     PersistenceError,
     ScrapeRunCounts,
+    ScrapeRunCoverage,
     ScrapeRunInput,
     ScrapeRunMetrics,
     ScrapeRunStatus,
@@ -99,6 +100,171 @@ def test_repeat_ingestion_is_idempotent_and_preserves_history(
         assert len(connection.execute(select(item_observations)).all()) == 1
 
 
+def test_complete_runs_reconcile_absence_without_changing_source_status(
+    repository: AuctionRepository,
+) -> None:
+    first_run = _run(repository)
+    present = convert_reconciled_record(_detail(), observed_at=datetime(2026, 7, 15, tzinfo=UTC))
+    missing = convert_reconciled_record(
+        _detail(
+            source_id="A000002",
+            canonical_source_url=(
+                "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733644"
+            ),
+            request_url=(
+                "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=private&disID=8733644"
+            ),
+        ),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    terminal = convert_reconciled_record(
+        _detail(
+            source_id="A000003",
+            canonical_source_url=(
+                "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733645"
+            ),
+            request_url=(
+                "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=private&disID=8733645"
+            ),
+            status=AuctionStatus.CLOSED,
+            status_raw="Closed",
+        ),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
+    repository.persist_reconciled_record(first_run, present)
+    repository.persist_reconciled_record(first_run, missing)
+    repository.persist_reconciled_record(first_run, terminal)
+    repository.finish_scrape_run(
+        first_run,
+        status=ScrapeRunStatus.SUCCEEDED,
+        counts=ScrapeRunCounts(0, 3, 3, 0, 3, 0),
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=1,
+            unique_listings_enumerated=3,
+            detail_attempted=3,
+            detail_succeeded=3,
+            persistence_succeeded=3,
+            enumeration_complete=True,
+        ),
+        persisted_source_ids=(present.source_id, missing.source_id, terminal.source_id),
+    )
+
+    incomplete_run = _run(repository)
+    repository.persist_reconciled_record(
+        incomplete_run,
+        convert_reconciled_record(_detail(), observed_at=datetime(2026, 7, 15, 12, tzinfo=UTC)),
+    )
+    repository.finish_scrape_run(
+        incomplete_run,
+        status=ScrapeRunStatus.SUCCEEDED,
+        counts=ScrapeRunCounts(0, 1, 0, 0, 0, 0),
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=0,
+            unique_listings_enumerated=1,
+            detail_attempted=1,
+            detail_succeeded=1,
+            persistence_succeeded=1,
+            enumeration_complete=False,
+        ),
+        persisted_source_ids=(present.source_id,),
+    )
+    with repository._engine.connect() as connection:
+        incomplete_missing_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+            ).where(auction_items.c.source_id == missing.source_id)
+        ).one()
+    assert incomplete_missing_row == (0, "current")
+
+    for day in range(1, 4):
+        run_id = _run(repository)
+        repository.persist_reconciled_record(
+            run_id,
+            convert_reconciled_record(
+                _detail(), observed_at=datetime(2026, 7, 15 + day, tzinfo=UTC)
+            ),
+        )
+        repository.finish_scrape_run(
+            run_id,
+            status=ScrapeRunStatus.SUCCEEDED,
+            counts=ScrapeRunCounts(0, 1, 0, 0, 0, 0),
+            coverage=ScrapeRunCoverage(
+                expected_product_groups=1,
+                processed_product_groups=1,
+                unique_listings_enumerated=1,
+                detail_attempted=1,
+                detail_succeeded=1,
+                persistence_succeeded=1,
+                enumeration_complete=True,
+            ),
+            persisted_source_ids=(present.source_id,),
+        )
+
+    with repository._engine.connect() as connection:
+        missing_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+                auction_items.c.status,
+                auction_items.c.closed_at,
+            ).where(auction_items.c.source_id == missing.source_id)
+        ).one()
+        terminal_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+                auction_items.c.status,
+            ).where(auction_items.c.source_id == terminal.source_id)
+        ).one()
+    assert missing_row == (3, "stale", AuctionStatus.OPEN.value, None)
+    assert terminal_row == (0, "current", AuctionStatus.CLOSED.value)
+
+    reappearance_run = _run(repository)
+    repository.persist_reconciled_record(
+        reappearance_run,
+        convert_reconciled_record(_detail(), observed_at=datetime(2026, 7, 19, tzinfo=UTC)),
+    )
+    repository.persist_reconciled_record(
+        reappearance_run,
+        convert_reconciled_record(
+            _detail(
+                source_id=missing.source_id,
+                canonical_source_url=missing.canonical_source_url,
+                request_url=missing.canonical_source_url,
+            ),
+            observed_at=datetime(2026, 7, 19, tzinfo=UTC),
+        ),
+    )
+    repository.finish_scrape_run(
+        reappearance_run,
+        status=ScrapeRunStatus.SUCCEEDED,
+        counts=ScrapeRunCounts(0, 2, 0, 1, 0, 0),
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=1,
+            unique_listings_enumerated=2,
+            detail_attempted=2,
+            detail_succeeded=2,
+            persistence_succeeded=2,
+            enumeration_complete=True,
+        ),
+        persisted_source_ids=(present.source_id, missing.source_id),
+    )
+    with repository._engine.connect() as connection:
+        reappeared_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+                auction_items.c.first_absent_at,
+                auction_items.c.stale_at,
+            ).where(auction_items.c.source_id == missing.source_id)
+        ).one()
+    assert reappeared_row == (0, "current", None, None)
+
+
 def test_current_observation_hash_migration_uses_the_latest_scrape_run(
     repository: AuctionRepository,
 ) -> None:
@@ -141,7 +307,9 @@ def test_current_observation_hash_migration_uses_the_latest_scrape_run(
         engine = create_postgres_engine(database_url)
         try:
             with engine.connect() as connection:
-                item = connection.execute(select(auction_items)).mappings().one()
+                item = connection.execute(
+                    select(auction_items.c.current_observation_hash)
+                ).mappings().one()
         finally:
             engine.dispose()
         assert item["current_observation_hash"] == latest_record.observation_hash
@@ -182,7 +350,9 @@ def test_current_observation_hash_migration_preserves_terminal_snapshot(
         engine = create_postgres_engine(database_url)
         try:
             with engine.connect() as connection:
-                item = connection.execute(select(auction_items)).mappings().one()
+                item = connection.execute(
+                    select(auction_items.c.status, auction_items.c.current_observation_hash)
+                ).mappings().one()
         finally:
             engine.dispose()
         assert item["status"] == AuctionStatus.CLOSED.value
@@ -238,7 +408,9 @@ def test_current_observation_hash_migration_preserves_open_snapshot(
         engine = create_postgres_engine(database_url)
         try:
             with engine.connect() as connection:
-                item = connection.execute(select(auction_items)).mappings().one()
+                item = connection.execute(
+                    select(auction_items.c.status, auction_items.c.current_observation_hash)
+                ).mappings().one()
         finally:
             engine.dispose()
         assert item["status"] == AuctionStatus.OPEN.value

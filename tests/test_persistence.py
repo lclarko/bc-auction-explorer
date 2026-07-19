@@ -5,7 +5,12 @@ import pytest
 from pydantic import ValidationError
 
 from bc_auction.models import AuctionDetailRecord, AuctionStatus, LocationStatus
-from bc_auction.persistence import PersistedAuctionRecord, convert_reconciled_record
+from bc_auction.persistence import (
+    PersistedAuctionRecord,
+    ScrapeRunCompletion,
+    ScrapeRunCoverage,
+    convert_reconciled_record,
+)
 
 
 def _detail(**updates: object) -> AuctionDetailRecord:
@@ -66,6 +71,51 @@ def test_hashes_ignore_observed_at_but_distinguish_missing_and_zero_values() -> 
     assert first.metadata_hash == repeated.metadata_hash
     assert first.observation_hash == repeated.observation_hash
     assert missing_bid.observation_hash != zero_bid.observation_hash
+
+
+def test_complete_coverage_requires_finished_enumeration_and_every_listing() -> None:
+    complete = ScrapeRunCoverage(
+        expected_product_groups=18,
+        processed_product_groups=18,
+        unique_listings_enumerated=3,
+        detail_attempted=3,
+        detail_succeeded=3,
+        persistence_succeeded=3,
+        enumeration_complete=True,
+    )
+    incomplete = ScrapeRunCoverage(
+        expected_product_groups=18,
+        processed_product_groups=18,
+        unique_listings_enumerated=3,
+        detail_attempted=3,
+        detail_succeeded=2,
+        persistence_succeeded=2,
+        persistence_failures=1,
+        enumeration_complete=True,
+    )
+    truncated = ScrapeRunCoverage(
+        expected_product_groups=18,
+        processed_product_groups=18,
+        unique_listings_enumerated=3,
+        detail_attempted=3,
+        detail_succeeded=3,
+        persistence_succeeded=3,
+        enumeration_complete=False,
+    )
+    missing_group = ScrapeRunCoverage(
+        expected_product_groups=18,
+        processed_product_groups=17,
+        unique_listings_enumerated=3,
+        detail_attempted=3,
+        detail_succeeded=3,
+        persistence_succeeded=3,
+        enumeration_complete=True,
+    )
+
+    assert complete.completion_status is ScrapeRunCompletion.COMPLETE
+    assert incomplete.completion_status is ScrapeRunCompletion.INCOMPLETE
+    assert truncated.completion_status is ScrapeRunCompletion.INCOMPLETE
+    assert missing_group.completion_status is ScrapeRunCompletion.INCOMPLETE
 
 
 def test_conversion_retains_unknown_locations_without_guessing() -> None:

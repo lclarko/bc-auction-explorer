@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         AuctionRepository,
         PersistResult,
         ScrapeRunCounts,
+        ScrapeRunCoverage,
         ScrapeRunInput,
         ScrapeRunMetrics,
     )
@@ -47,6 +48,10 @@ _PARSER_VERSION = "ms2-v1"
 class _SearchCollection:
     records: tuple[SearchResultRecord, ...]
     pages_visited: int
+    expected_product_groups: int = 0
+    processed_product_groups: int = 0
+    duplicate_listings: int = 0
+    enumeration_complete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +60,10 @@ class _ScrapeOutcome:
     failures: list[dict[str, str]]
     pages_visited: int
     items_seen: int
+    expected_product_groups: int = 0
+    processed_product_groups: int = 0
+    duplicate_listings: int = 0
+    enumeration_complete: bool = False
 
 
 class _ProgressBar(Protocol):
@@ -203,18 +212,25 @@ def _collect_search_records(
     records_by_source_id: dict[str, SearchResultRecord] = {}
     records_by_canonical_url: dict[str, SearchResultRecord] = {}
     pages_visited = 0
+    duplicate_listings = 0
+    processed_product_groups = 0
+    truncated = False
 
     def add_search_record(record: SearchResultRecord) -> bool:
-        _add_unique_search_record(
+        nonlocal duplicate_listings
+        added = _add_unique_search_record(
             record,
             records,
             records_by_source_id,
             records_by_canonical_url,
         )
+        if not added:
+            duplicate_listings += 1
         return len(records) >= limit
 
     for product_group in search.product_groups:
         if len(records) >= limit:
+            truncated = True
             break
         page = client.search_product_group(
             product_group,
@@ -227,13 +243,27 @@ def _collect_search_records(
             on_record=add_search_record,
         )
         pages_visited += group_collection.pages_visited
+        processed_product_groups += 1
+        if len(records) >= limit:
+            # The collector stops as soon as the cap is reached, so it cannot
+            # prove that the remaining source pages and groups were exhausted.
+            truncated = True
         if progress is not None:
             progress.advance_search_group(
                 unique_listings=len(records),
                 pages_visited=pages_visited,
             )
 
-    return _SearchCollection(records=tuple(records[:limit]), pages_visited=pages_visited)
+    return _SearchCollection(
+        records=tuple(records[:limit]),
+        pages_visited=pages_visited,
+        expected_product_groups=len(search.product_groups),
+        processed_product_groups=processed_product_groups,
+        duplicate_listings=duplicate_listings,
+        enumeration_complete=(
+            not truncated and processed_product_groups == len(search.product_groups)
+        ),
+    )
 
 
 def _collect_search_records_from_page(
@@ -292,7 +322,7 @@ def _add_unique_search_record(
     records: list[SearchResultRecord],
     records_by_source_id: dict[str, SearchResultRecord],
     records_by_canonical_url: dict[str, SearchResultRecord],
-) -> None:
+) -> bool:
     existing_source_id = records_by_source_id.get(record.source_id)
     canonical_url = str(record.canonical_source_url)
     existing_canonical_url = records_by_canonical_url.get(canonical_url)
@@ -303,10 +333,11 @@ def _add_unique_search_record(
     if existing_canonical_url is not None and existing_canonical_url.source_id != record.source_id:
         raise ParserContractError("product groups reused a canonical URL for different source IDs")
     if existing_source_id is not None or existing_canonical_url is not None:
-        return
+        return False
     records.append(record)
     records_by_source_id[record.source_id] = record
     records_by_canonical_url[canonical_url] = record
+    return True
 
 
 def scrape(
@@ -356,6 +387,10 @@ def _scrape_with_outcome(
             failures=[],
             pages_visited=search_records.pages_visited,
             items_seen=len(search_records.records),
+            expected_product_groups=search_records.expected_product_groups,
+            processed_product_groups=search_records.processed_product_groups,
+            duplicate_listings=search_records.duplicate_listings,
+            enumeration_complete=search_records.enumeration_complete,
         )
 
     records: list[_ScrapeRecord] = []
@@ -385,6 +420,10 @@ def _scrape_with_outcome(
         failures=failures,
         pages_visited=search_records.pages_visited,
         items_seen=len(search_records.records),
+        expected_product_groups=search_records.expected_product_groups,
+        processed_product_groups=search_records.processed_product_groups,
+        duplicate_listings=search_records.duplicate_listings,
+        enumeration_complete=search_records.enumeration_complete,
     )
 
 
@@ -444,6 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_id: UUID | None = None
     outcome: _ScrapeOutcome | None = None
     counts: ScrapeRunCounts | None = None
+    coverage: ScrapeRunCoverage | None = None
     metrics: ScrapeRunMetrics | None = None
     progress = _create_progress_reporter(sys.stderr)
     run_finished = False
@@ -471,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 metrics = _scrape_run_metrics(client) if args.persist else None
         records = outcome.records
         failures = outcome.failures
+        coverage = _scrape_run_coverage(outcome, (), 0)
         if repository is not None and run_id is not None:
             _validate_persistence_batch(records)
             try:
@@ -483,9 +524,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             except _PersistenceBatchFailure as exc:
                 failures.extend(exc.failures)
                 counts = _scrape_run_counts(outcome, exc.results, len(failures))
+                coverage = _scrape_run_coverage(outcome, exc.results, len(exc.failures))
                 raise
             failures.extend(persistence_failures)
             counts = _scrape_run_counts(outcome, persistence_results, len(failures))
+            coverage = _scrape_run_coverage(
+                outcome,
+                persistence_results,
+                len(persistence_failures),
+            )
             from bc_auction.persistence import ScrapeRunStatus
 
             repository.finish_scrape_run(
@@ -493,6 +540,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status=ScrapeRunStatus.PARTIAL if failures else ScrapeRunStatus.SUCCEEDED,
                 counts=counts,
                 metrics=metrics,
+                coverage=coverage,
+                persisted_source_ids=[record.source_id for record in records],
             )
             run_finished = True
         output = {
@@ -513,13 +562,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
         if progress is not None:
             progress.close()
-        _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
+        _report_failed_run_finalization(
+            repository, run_id, outcome, counts, coverage, metrics, run_finished
+        )
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
         if progress is not None:
             progress.close()
-        _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
+        _report_failed_run_finalization(
+            repository, run_id, outcome, counts, coverage, metrics, run_finished
+        )
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     finally:
@@ -639,6 +692,26 @@ def _scrape_run_counts(
     )
 
 
+def _scrape_run_coverage(
+    outcome: _ScrapeOutcome,
+    results: Sequence[PersistResult],
+    persistence_failures: int,
+) -> ScrapeRunCoverage:
+    from bc_auction.persistence import ScrapeRunCoverage
+
+    return ScrapeRunCoverage(
+        expected_product_groups=outcome.expected_product_groups,
+        processed_product_groups=outcome.processed_product_groups,
+        unique_listings_enumerated=outcome.items_seen,
+        duplicate_listings_enumerated=outcome.duplicate_listings,
+        detail_attempted=outcome.items_seen,
+        detail_succeeded=len(outcome.records),
+        persistence_succeeded=len(results),
+        persistence_failures=persistence_failures,
+        enumeration_complete=outcome.enumeration_complete,
+    )
+
+
 def _scrape_run_metrics(client: AuctionClient) -> ScrapeRunMetrics:
     from bc_auction.persistence import ScrapeRunMetrics
 
@@ -660,12 +733,13 @@ def _report_failed_run_finalization(
     run_id: UUID | None,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
+    coverage: ScrapeRunCoverage | None,
     metrics: ScrapeRunMetrics | None,
     run_finished: bool,
 ) -> None:
     if repository is None or run_id is None or run_finished:
         return
-    finalization_error = _finish_failed_run(repository, run_id, outcome, counts, metrics)
+    finalization_error = _finish_failed_run(repository, run_id, outcome, counts, coverage, metrics)
     if finalization_error is not None:
         print(f"scrape run finalization failed: {finalization_error}", file=sys.stderr)
 
@@ -675,6 +749,7 @@ def _finish_failed_run(
     run_id: UUID,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
+    coverage: ScrapeRunCoverage | None,
     metrics: ScrapeRunMetrics | None,
 ) -> str | None:
     from bc_auction.persistence import ScrapeRunCounts, ScrapeRunStatus
@@ -692,6 +767,7 @@ def _finish_failed_run(
                 observations_created=0,
                 item_failures=len(outcome.failures) if outcome is not None else 0,
             ),
+            coverage=coverage,
             metrics=metrics,
             error_summary="scrape failed",
         )

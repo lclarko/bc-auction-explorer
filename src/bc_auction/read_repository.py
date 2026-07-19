@@ -135,7 +135,7 @@ class AuctionReadRepository:
             facets = tuple(_facet_from_row(row) for row in rows)
         return FacetList(items=facets)
 
-    def scrape_status(self) -> ScrapeStatus:
+    def scrape_status(self, *, request_time: datetime) -> ScrapeStatus:
         run_columns = (
             scrape_runs.c.started_at,
             scrape_runs.c.finished_at,
@@ -156,6 +156,16 @@ class AuctionReadRepository:
             scrape_runs.c.source_request_duration_ms,
             scrape_runs.c.source_request_wait_duration_ms,
             scrape_runs.c.source_retry_wait_duration_ms,
+            scrape_runs.c.completion_status,
+            scrape_runs.c.expected_product_groups,
+            scrape_runs.c.processed_product_groups,
+            scrape_runs.c.unique_listings_enumerated,
+            scrape_runs.c.duplicate_listings_enumerated,
+            scrape_runs.c.detail_attempted,
+            scrape_runs.c.detail_succeeded,
+            scrape_runs.c.persistence_succeeded,
+            scrape_runs.c.persistence_failures,
+            scrape_runs.c.enumeration_complete,
         )
         latest_run_statement = select(*run_columns).order_by(
             scrape_runs.c.started_at.desc(),
@@ -165,14 +175,40 @@ class AuctionReadRepository:
         latest_successful_statement = latest_run_statement.where(
             scrape_runs.c.status == "succeeded"
         )
+        latest_complete_statement = latest_run_statement.where(
+            scrape_runs.c.status == "succeeded",
+            scrape_runs.c.completion_status == "complete",
+        )
         with self._engine.connect() as connection:
             latest_run = connection.execute(latest_run_statement.limit(1)).mappings().one_or_none()
             latest_successful_run = (
                 connection.execute(latest_successful_statement.limit(1)).mappings().one_or_none()
             )
-            listing_count, latest_listing_seen_at = connection.execute(
-                select(func.count(auction_items.c.id), func.max(auction_items.c.last_seen_at))
-            ).one()
+            latest_complete_run = (
+                connection.execute(latest_complete_statement.limit(1)).mappings().one_or_none()
+            )
+            listing_count, latest_listing_seen_at, active_listing_count, stale_listing_count = (
+                connection.execute(
+                    select(
+                        func.count(auction_items.c.id),
+                        func.max(auction_items.c.last_seen_at),
+                        func.count()
+                        .filter(auction_items.c.inventory_state == "current"),
+                        func.count().filter(auction_items.c.inventory_state == "stale"),
+                    )
+                ).one()
+            )
+        latest_complete_summary = (
+            _scrape_run_from_row(latest_complete_run)
+            if latest_complete_run is not None
+            else None
+        )
+        latest_complete_age_seconds = None
+        if latest_complete_summary is not None and latest_complete_summary.finished_at is not None:
+            latest_complete_age_seconds = max(
+                0,
+                int((request_time - latest_complete_summary.finished_at).total_seconds()),
+            )
         return ScrapeStatus(
             latest_run=_scrape_run_from_row(latest_run) if latest_run is not None else None,
             latest_successful_run=(
@@ -182,6 +218,10 @@ class AuctionReadRepository:
             ),
             listing_count=int(listing_count),
             latest_listing_seen_at=latest_listing_seen_at,
+            latest_complete_run=latest_complete_summary,
+            latest_complete_age_seconds=latest_complete_age_seconds,
+            active_listing_count=int(active_listing_count),
+            stale_listing_count=int(stale_listing_count),
         )
 
     @staticmethod
@@ -236,6 +276,9 @@ class AuctionReadRepository:
             auction_items.c.last_seen_at,
             auction_items.c.last_changed_at,
             auction_items.c.closed_at,
+            auction_items.c.last_complete_seen_at,
+            auction_items.c.complete_absence_count,
+            auction_items.c.inventory_state,
             item_observations.c.current_bid,
             item_observations.c.minimum_bid,
             item_observations.c.starting_bid,
@@ -321,6 +364,7 @@ class AuctionReadRepository:
         closing_at = item_observations.c.closing_at
         if view is ListingView.ACTIVE:
             return and_(
+                auction_items.c.inventory_state == "current",
                 is_open,
                 or_(closing_at.is_(None), closing_at > request_time),
             )
@@ -430,6 +474,9 @@ def _listing_values(row: RowMapping) -> dict[str, object]:
         "last_seen_at": row["last_seen_at"],
         "last_changed_at": row["last_changed_at"],
         "closed_at": row["closed_at"],
+        "last_complete_seen_at": row["last_complete_seen_at"],
+        "complete_absence_count": row["complete_absence_count"],
+        "inventory_state": row["inventory_state"],
     }
 
 
@@ -459,6 +506,16 @@ def _scrape_run_from_row(row: RowMapping) -> ScrapeRunSummary:
             "source_request_duration_ms": row["source_request_duration_ms"],
             "source_request_wait_duration_ms": row["source_request_wait_duration_ms"],
             "source_retry_wait_duration_ms": row["source_retry_wait_duration_ms"],
+            "completion_status": row["completion_status"],
+            "expected_product_groups": row["expected_product_groups"],
+            "processed_product_groups": row["processed_product_groups"],
+            "unique_listings_enumerated": row["unique_listings_enumerated"],
+            "duplicate_listings_enumerated": row["duplicate_listings_enumerated"],
+            "detail_attempted": row["detail_attempted"],
+            "detail_succeeded": row["detail_succeeded"],
+            "persistence_succeeded": row["persistence_succeeded"],
+            "persistence_failures": row["persistence_failures"],
+            "enumeration_complete": bool(row["enumeration_complete"]),
         }
     )
 

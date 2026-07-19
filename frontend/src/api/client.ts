@@ -10,6 +10,7 @@ export type ScrapeStatus = components["schemas"]["ScrapeStatus"];
 export type AuctionStatus = components["schemas"]["AuctionStatus"];
 export type ListingView = components["schemas"]["ListingView"];
 export type ListingAvailability = components["schemas"]["ListingAvailability"];
+export type InventoryState = components["schemas"]["InventoryState"];
 export type ListingSort = components["schemas"]["ListingSort"];
 export type ListingQuery = NonNullable<
   operations["list_listings_api_listings_get"]["parameters"]["query"]
