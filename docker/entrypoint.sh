@@ -17,8 +17,8 @@ chmod 700 "$runtime_secret_directory"
 if [ -n "${BC_AUCTION_DATABASE_PASSWORD_FILE:-}" ]; then
     umask 077
     cat "$BC_AUCTION_DATABASE_PASSWORD_FILE" > "$runtime_password_file"
-    chown bcauction:bcauction "$runtime_password_file"
     chmod 600 "$runtime_password_file"
+    chown bcauction:bcauction "$runtime_password_file"
     export BC_AUCTION_DATABASE_PASSWORD_FILE="$runtime_password_file"
 fi
 
