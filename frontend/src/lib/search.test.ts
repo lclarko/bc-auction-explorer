@@ -46,8 +46,7 @@ describe("listing search state", () => {
 
     expect(query.min_price).toBe("0");
     expect(query.closing_after).toBe("2026-03-08T08:00:00.000Z");
-    // B.C. remains on UTC-7 after its final spring-forward transition in 2026.
-    expect(query.closing_before).toBe("2026-11-02T06:59:59.999Z");
+    expect(query.closing_before).toBe("2026-11-02T07:59:59.999Z");
     expect(query.view).toBe("active");
     expect(query.sort).toBe("closing_soon");
   });

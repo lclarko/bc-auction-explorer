@@ -86,9 +86,6 @@ write routes and its query layer issues only read statements.
 
 ## Local frontend
 
-The frontend requires Node.js 24.18.0. Version managers that support `.node-version` will
-select it automatically.
-
 Use Python 3.12 or newer for the API and schema-generation commands:
 
 ```bash
