@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from bc_auction.models import AuctionStatus, LocationStatus
+from bc_auction.persistence import ScrapeRunCompletion
 from bc_auction.urls import canonicalize_source_url, normalize_public_url
 
 
@@ -38,12 +39,6 @@ class InventoryState(StrEnum):
     CURRENT = "current"
     NOT_OBSERVED = "not_observed"
     STALE = "stale"
-
-
-class ScrapeRunCompletion(StrEnum):
-    PENDING = "pending"
-    COMPLETE = "complete"
-    INCOMPLETE = "incomplete"
 
 
 class ScrapeRunState(StrEnum):

@@ -483,6 +483,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     run_id: UUID | None = None
     outcome: _ScrapeOutcome | None = None
     counts: ScrapeRunCounts | None = None
+    coverage: ScrapeRunCoverage | None = None
     metrics: ScrapeRunMetrics | None = None
     progress = _create_progress_reporter(sys.stderr)
     run_finished = False
@@ -510,6 +511,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 metrics = _scrape_run_metrics(client) if args.persist else None
         records = outcome.records
         failures = outcome.failures
+        coverage = _scrape_run_coverage(outcome, (), 0)
         if repository is not None and run_id is not None:
             _validate_persistence_batch(records)
             try:
@@ -522,9 +524,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             except _PersistenceBatchFailure as exc:
                 failures.extend(exc.failures)
                 counts = _scrape_run_counts(outcome, exc.results, len(failures))
+                coverage = _scrape_run_coverage(outcome, exc.results, len(exc.failures))
                 raise
             failures.extend(persistence_failures)
             counts = _scrape_run_counts(outcome, persistence_results, len(failures))
+            coverage = _scrape_run_coverage(
+                outcome,
+                persistence_results,
+                len(persistence_failures),
+            )
             from bc_auction.persistence import ScrapeRunStatus
 
             repository.finish_scrape_run(
@@ -532,11 +540,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 status=ScrapeRunStatus.PARTIAL if failures else ScrapeRunStatus.SUCCEEDED,
                 counts=counts,
                 metrics=metrics,
-                coverage=_scrape_run_coverage(
-                    outcome,
-                    persistence_results,
-                    len(persistence_failures),
-                ),
+                coverage=coverage,
                 persisted_source_ids=[record.source_id for record in records],
             )
             run_finished = True
@@ -558,13 +562,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (OSError, ScraperError, httpx.HTTPError, ValueError) as exc:
         if progress is not None:
             progress.close()
-        _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
+        _report_failed_run_finalization(
+            repository, run_id, outcome, counts, coverage, metrics, run_finished
+        )
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
         if progress is not None:
             progress.close()
-        _report_failed_run_finalization(repository, run_id, outcome, counts, metrics, run_finished)
+        _report_failed_run_finalization(
+            repository, run_id, outcome, counts, coverage, metrics, run_finished
+        )
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     finally:
@@ -725,12 +733,13 @@ def _report_failed_run_finalization(
     run_id: UUID | None,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
+    coverage: ScrapeRunCoverage | None,
     metrics: ScrapeRunMetrics | None,
     run_finished: bool,
 ) -> None:
     if repository is None or run_id is None or run_finished:
         return
-    finalization_error = _finish_failed_run(repository, run_id, outcome, counts, metrics)
+    finalization_error = _finish_failed_run(repository, run_id, outcome, counts, coverage, metrics)
     if finalization_error is not None:
         print(f"scrape run finalization failed: {finalization_error}", file=sys.stderr)
 
@@ -740,6 +749,7 @@ def _finish_failed_run(
     run_id: UUID,
     outcome: _ScrapeOutcome | None,
     counts: ScrapeRunCounts | None,
+    coverage: ScrapeRunCoverage | None,
     metrics: ScrapeRunMetrics | None,
 ) -> str | None:
     from bc_auction.persistence import ScrapeRunCounts, ScrapeRunStatus
@@ -757,6 +767,7 @@ def _finish_failed_run(
                 observations_created=0,
                 item_failures=len(outcome.failures) if outcome is not None else 0,
             ),
+            coverage=coverage,
             metrics=metrics,
             error_summary="scrape failed",
         )

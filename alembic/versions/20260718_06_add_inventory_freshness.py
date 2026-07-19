@@ -48,7 +48,7 @@ def upgrade() -> None:
         )
     op.add_column(
         "scrape_runs",
-        sa.Column("enumeration_complete", sa.Integer(), nullable=False, server_default="0"),
+        sa.Column("enumeration_complete", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
     op.create_check_constraint(
         "ck_scrape_runs_completion_status",

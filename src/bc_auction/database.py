@@ -2,6 +2,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Column,
     DateTime,
@@ -43,7 +44,7 @@ scrape_runs = Table(
     Column("detail_succeeded", Integer, nullable=False, server_default="0"),
     Column("persistence_succeeded", Integer, nullable=False, server_default="0"),
     Column("persistence_failures", Integer, nullable=False, server_default="0"),
-    Column("enumeration_complete", Integer, nullable=False, server_default="0"),
+    Column("enumeration_complete", Boolean, nullable=False, server_default="false"),
     Column("pages_visited", Integer, nullable=False, server_default="0"),
     Column("items_seen", Integer, nullable=False, server_default="0"),
     Column("items_created", Integer, nullable=False, server_default="0"),

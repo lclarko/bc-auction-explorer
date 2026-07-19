@@ -9,7 +9,7 @@ from typing import TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
-from sqlalchemy import Connection, Engine, case, func, insert, select, text, update
+from sqlalchemy import Connection, Engine, and_, case, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -36,6 +36,9 @@ class ScrapeRunCompletion(StrEnum):
     PENDING = "pending"
     COMPLETE = "complete"
     INCOMPLETE = "incomplete"
+
+
+_STALE_ABSENCE_THRESHOLD = 3
 
 
 class PersistenceError(RuntimeError):
@@ -419,7 +422,8 @@ class AuctionRepository:
         persisted_source_ids: Sequence[str],
         completed_at: datetime,
     ) -> None:
-        seen_condition = auction_items.c.source_id.in_(tuple(persisted_source_ids))
+        open_item = auction_items.c.status == AuctionStatus.OPEN.value
+        seen_condition = and_(open_item, auction_items.c.source_id.in_(tuple(persisted_source_ids)))
         connection.execute(
             update(auction_items)
             .where(seen_condition)
@@ -434,17 +438,17 @@ class AuctionRepository:
         next_absence_count = auction_items.c.complete_absence_count + 1
         connection.execute(
             update(auction_items)
-            .where(~seen_condition)
+            .where(and_(open_item, ~auction_items.c.source_id.in_(tuple(persisted_source_ids))))
             .values(
                 complete_absence_count=next_absence_count,
                 inventory_state=case(
-                    (next_absence_count >= 3, "stale"),
+                    (next_absence_count >= _STALE_ABSENCE_THRESHOLD, "stale"),
                     else_="not_observed",
                 ),
                 first_absent_at=func.coalesce(auction_items.c.first_absent_at, completed_at),
                 stale_at=case(
                     (
-                        next_absence_count >= 3,
+                        next_absence_count >= _STALE_ABSENCE_THRESHOLD,
                         func.coalesce(auction_items.c.stale_at, completed_at),
                     ),
                     else_=auction_items.c.stale_at,

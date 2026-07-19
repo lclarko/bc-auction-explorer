@@ -93,9 +93,29 @@ def test_complete_coverage_requires_finished_enumeration_and_every_listing() -> 
         persistence_failures=1,
         enumeration_complete=True,
     )
+    truncated = ScrapeRunCoverage(
+        expected_product_groups=18,
+        processed_product_groups=18,
+        unique_listings_enumerated=3,
+        detail_attempted=3,
+        detail_succeeded=3,
+        persistence_succeeded=3,
+        enumeration_complete=False,
+    )
+    missing_group = ScrapeRunCoverage(
+        expected_product_groups=18,
+        processed_product_groups=17,
+        unique_listings_enumerated=3,
+        detail_attempted=3,
+        detail_succeeded=3,
+        persistence_succeeded=3,
+        enumeration_complete=True,
+    )
 
     assert complete.completion_status is ScrapeRunCompletion.COMPLETE
     assert incomplete.completion_status is ScrapeRunCompletion.INCOMPLETE
+    assert truncated.completion_status is ScrapeRunCompletion.INCOMPLETE
+    assert missing_group.completion_status is ScrapeRunCompletion.INCOMPLETE
 
 
 def test_conversion_retains_unknown_locations_without_guessing() -> None:

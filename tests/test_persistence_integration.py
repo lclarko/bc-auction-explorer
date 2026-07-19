@@ -117,22 +117,37 @@ def test_complete_runs_reconcile_absence_without_changing_source_status(
         ),
         observed_at=datetime(2026, 7, 15, tzinfo=UTC),
     )
+    terminal = convert_reconciled_record(
+        _detail(
+            source_id="A000003",
+            canonical_source_url=(
+                "https://www.bcauction.ca/open.dll/showDisplayDocument?disID=8733645"
+            ),
+            request_url=(
+                "https://www.bcauction.ca/open.dll/showDocSummary?sessionID=private&disID=8733645"
+            ),
+            status=AuctionStatus.CLOSED,
+            status_raw="Closed",
+        ),
+        observed_at=datetime(2026, 7, 15, tzinfo=UTC),
+    )
     repository.persist_reconciled_record(first_run, present)
     repository.persist_reconciled_record(first_run, missing)
+    repository.persist_reconciled_record(first_run, terminal)
     repository.finish_scrape_run(
         first_run,
         status=ScrapeRunStatus.SUCCEEDED,
-        counts=ScrapeRunCounts(0, 2, 2, 0, 2, 0),
+        counts=ScrapeRunCounts(0, 3, 3, 0, 3, 0),
         coverage=ScrapeRunCoverage(
             expected_product_groups=1,
             processed_product_groups=1,
-            unique_listings_enumerated=2,
-            detail_attempted=2,
-            detail_succeeded=2,
-            persistence_succeeded=2,
+            unique_listings_enumerated=3,
+            detail_attempted=3,
+            detail_succeeded=3,
+            persistence_succeeded=3,
             enumeration_complete=True,
         ),
-        persisted_source_ids=(present.source_id, missing.source_id),
+        persisted_source_ids=(present.source_id, missing.source_id, terminal.source_id),
     )
 
     for day in range(1, 4):
@@ -160,7 +175,7 @@ def test_complete_runs_reconcile_absence_without_changing_source_status(
         )
 
     with repository._engine.connect() as connection:
-        row = connection.execute(
+        missing_row = connection.execute(
             select(
                 auction_items.c.complete_absence_count,
                 auction_items.c.inventory_state,
@@ -168,7 +183,15 @@ def test_complete_runs_reconcile_absence_without_changing_source_status(
                 auction_items.c.closed_at,
             ).where(auction_items.c.source_id == missing.source_id)
         ).one()
-    assert row == (3, "stale", AuctionStatus.OPEN.value, None)
+        terminal_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+                auction_items.c.status,
+            ).where(auction_items.c.source_id == terminal.source_id)
+        ).one()
+    assert missing_row == (3, "stale", AuctionStatus.OPEN.value, None)
+    assert terminal_row == (0, "current", AuctionStatus.CLOSED.value)
 
 
 def test_current_observation_hash_migration_uses_the_latest_scrape_run(
