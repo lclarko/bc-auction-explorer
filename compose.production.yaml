@@ -46,6 +46,10 @@ services:
 
   migrate:
     <<: *runtime-security
+    cap_add: &application-entrypoint-capabilities
+      - CHOWN
+      - SETGID
+      - SETUID
     build:
       <<: *application-build
       target: migrate
@@ -66,6 +70,7 @@ services:
 
   api:
     <<: *runtime-security
+    cap_add: *application-entrypoint-capabilities
     build:
       <<: *application-build
       target: api
@@ -98,6 +103,7 @@ services:
 
   operations:
     <<: *runtime-security
+    cap_add: *application-entrypoint-capabilities
     build:
       <<: *application-build
       target: operations
