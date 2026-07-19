@@ -149,3 +149,9 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:8080/
           test "$(docker compose -f compose.production.yaml port postgres 5432 2>/dev/null || true)" = ""
+          backup_dir="$RUNNER_TEMP/bc-auction-backups"
+          mkdir -p "$backup_dir"
+          scripts/backup-db.sh "$backup_dir"
+          archive="$(find "$backup_dir" -name '*.dump' -print -quit)"
+          test -n "$archive"
+          BC_AUCTION_RESTORE_SERVICES="api proxy" scripts/restore-db.sh --replace "$archive"

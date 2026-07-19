@@ -13,6 +13,7 @@ if [ ! -f "$archive" ]; then
 fi
 
 compose="docker compose -f compose.production.yaml"
+restore_services=${BC_AUCTION_RESTORE_SERVICES:-"api operations proxy"}
 
 if ! $compose exec -T postgres sh -ceu '
     PGPASSWORD="$(tr -d "\r\n" < /run/secrets/migration_password)"
@@ -40,7 +41,7 @@ if ! $compose run --rm migrate; then
     exit 5
 fi
 
-$compose up -d api operations proxy
+$compose up -d $restore_services
 if ! $compose exec -T api python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready').read()"; then
     echo '{"event":"restore_failed","reason":"readiness_failed"}' >&2
     exit 5
