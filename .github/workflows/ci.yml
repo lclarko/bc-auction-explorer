@@ -171,9 +171,15 @@ jobs:
             fi
             sleep 2
           done
-          curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/health/ready
+          if ! curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/health/ready; then
+            docker compose -f compose.production.yaml ps -a
+            docker compose -f compose.production.yaml logs proxy api frontend
+            exit 1
+          fi
           curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/
           test "$(docker compose -f compose.production.yaml exec -T api id -u)" = "10001"
+          test "$(docker compose -f compose.production.yaml exec -T proxy id -u)" = "10001"
+          test -z "$(docker compose -f compose.production.yaml exec -T proxy getcap /usr/bin/caddy)"
           test "$(docker compose -f compose.production.yaml port postgres 5432 2>/dev/null || true)" = ""
           backup_dir="$RUNNER_TEMP/bc-auction-backups"
           mkdir -p "$backup_dir"
