@@ -34,6 +34,18 @@ class ListingAvailability(StrEnum):
     UNKNOWN = "unknown"
 
 
+class InventoryState(StrEnum):
+    CURRENT = "current"
+    NOT_OBSERVED = "not_observed"
+    STALE = "stale"
+
+
+class ScrapeRunCompletion(StrEnum):
+    PENDING = "pending"
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+
+
 class ScrapeRunState(StrEnum):
     RUNNING = "running"
     SUCCEEDED = "succeeded"
@@ -51,6 +63,7 @@ class _TimestampedModel(_ApiModel):
         "last_seen_at",
         "last_changed_at",
         "closed_at",
+        "last_complete_seen_at",
         "observed_at",
         "closing_at",
         "started_at",
@@ -87,6 +100,9 @@ class ListingSummary(_TimestampedModel):
     last_seen_at: datetime
     last_changed_at: datetime
     closed_at: datetime | None = None
+    last_complete_seen_at: datetime | None = None
+    complete_absence_count: int = Field(default=0, ge=0)
+    inventory_state: InventoryState = InventoryState.CURRENT
 
     @field_validator("canonical_source_url")
     @classmethod
@@ -155,6 +171,16 @@ class ScrapeRunSummary(_TimestampedModel):
     source_request_duration_ms: int = Field(ge=0)
     source_request_wait_duration_ms: int = Field(ge=0)
     source_retry_wait_duration_ms: int = Field(ge=0)
+    completion_status: ScrapeRunCompletion = ScrapeRunCompletion.PENDING
+    expected_product_groups: int = Field(default=0, ge=0)
+    processed_product_groups: int = Field(default=0, ge=0)
+    unique_listings_enumerated: int = Field(default=0, ge=0)
+    duplicate_listings_enumerated: int = Field(default=0, ge=0)
+    detail_attempted: int = Field(default=0, ge=0)
+    detail_succeeded: int = Field(default=0, ge=0)
+    persistence_succeeded: int = Field(default=0, ge=0)
+    persistence_failures: int = Field(default=0, ge=0)
+    enumeration_complete: bool = False
 
 
 class ScrapeStatus(_TimestampedModel):
@@ -162,6 +188,10 @@ class ScrapeStatus(_TimestampedModel):
     latest_successful_run: ScrapeRunSummary | None = None
     listing_count: int = Field(ge=0)
     latest_listing_seen_at: datetime | None = None
+    latest_complete_run: ScrapeRunSummary | None = None
+    latest_complete_age_seconds: int | None = Field(default=None, ge=0)
+    active_listing_count: int = Field(default=0, ge=0)
+    stale_listing_count: int = Field(default=0, ge=0)
 
 
 class ApiError(_ApiModel):

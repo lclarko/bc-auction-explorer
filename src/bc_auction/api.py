@@ -192,7 +192,7 @@ def create_app(
     def scrape_status(
         repository: Annotated[AuctionReadRepository, Depends(_read_repository)],
     ) -> ScrapeStatus:
-        return repository.scrape_status()
+        return repository.scrape_status(request_time=_provided_utc_now(now_provider))
 
     return app
 
