@@ -119,6 +119,7 @@ jobs:
           for secret_name in postgres_admin_password migration_password scraper_password api_password; do
             printf 'ci-only-%s\n' "$secret_name" > "$secret_dir/$secret_name"
             chmod 600 "$secret_dir/$secret_name"
+            sudo chown root:root "$secret_dir/$secret_name"
           done
           export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
           export BC_AUCTION_MIGRATION_PASSWORD_FILE="$secret_dir/migration_password"
@@ -146,6 +147,7 @@ jobs:
           for secret_name in postgres_admin_password migration_password scraper_password api_password; do
             printf 'ci-only-%s\n' "$secret_name" > "$secret_dir/$secret_name"
             chmod 600 "$secret_dir/$secret_name"
+            sudo chown root:root "$secret_dir/$secret_name"
           done
           export BC_AUCTION_POSTGRES_ADMIN_PASSWORD_FILE="$secret_dir/postgres_admin_password"
           export BC_AUCTION_MIGRATION_PASSWORD_FILE="$secret_dir/migration_password"

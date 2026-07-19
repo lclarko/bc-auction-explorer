@@ -138,8 +138,10 @@ mkdir -p /etc/bc-auction-explorer/secrets
 chmod 700 /etc/bc-auction-explorer/secrets
 ```
 
-Set the four `*_PASSWORD_FILE` paths in `.env`, create the referenced files with mode
-`0600`, then start the stack:
+Set the four `*_PASSWORD_FILE` paths in `.env`, create the referenced files as
+root-owned with mode `0600`, then start the stack. The production runtime expects a
+rootful Docker daemon so its short-lived entrypoint can copy each password before it
+drops to the non-root service user.
 
 ```bash
 docker compose --env-file .env -f compose.production.yaml up -d --build
