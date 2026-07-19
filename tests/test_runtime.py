@@ -53,6 +53,17 @@ def test_operations_settings_validate_schedule_and_limits(monkeypatch: pytest.Mo
     assert settings.scrape_limit == 1000
 
 
+@pytest.mark.parametrize("scrape_limit", ("zero", "0", "-1"))
+def test_operations_settings_reject_invalid_scrape_limits(
+    monkeypatch: pytest.MonkeyPatch,
+    scrape_limit: str,
+) -> None:
+    monkeypatch.setenv("BC_AUCTION_SCRAPE_LIMIT", scrape_limit)
+
+    with pytest.raises(RuntimeConfigurationError, match="BC_AUCTION_SCRAPE_LIMIT"):
+        OperationsSettings.from_environment()
+
+
 def test_operations_settings_reject_invalid_schedule(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BC_AUCTION_SCRAPE_TIMES", "tomorrow")
 
