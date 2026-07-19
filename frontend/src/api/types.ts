@@ -84,6 +84,57 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/health/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Live */
+        get: operations["live_health_live_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Operations */
+        get: operations["operations_health_operations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/ready": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ready */
+        get: operations["ready_health_ready_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 };
 export type webhooks = Record<string, never>;
 export type components = {
@@ -290,6 +341,50 @@ export type components = {
          * @enum {string}
          */
         LocationStatus: "exact" | "alias" | "unknown";
+        /** OperationsConfiguration */
+        OperationsConfiguration: {
+            /** Freshness Max Age Seconds */
+            freshness_max_age_seconds: number;
+            /** Maximum Run Seconds */
+            maximum_run_seconds: number;
+            /** Scrape Limit */
+            scrape_limit: number;
+            /** Scrape Times */
+            scrape_times: string[];
+            /** Timezone */
+            timezone: string;
+        };
+        /** OperationsHealth */
+        OperationsHealth: {
+            build: components["schemas"]["RuntimeBuild"];
+            configuration: components["schemas"]["OperationsConfiguration"];
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Latest Complete Age Seconds */
+            latest_complete_age_seconds?: number | null;
+            latest_complete_run?: components["schemas"]["OperationsRun"] | null;
+            latest_scheduled_run?: components["schemas"]["OperationsRun"] | null;
+            state: components["schemas"]["OperationsState"];
+        };
+        /** OperationsRun */
+        OperationsRun: {
+            completion_status: components["schemas"]["ScrapeRunCompletion"];
+            /** Finished At */
+            finished_at?: string | null;
+            /** Run Id */
+            run_id: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            status: components["schemas"]["ScrapeRunState"];
+        };
+        /**
+         * OperationsState
+         * @enum {string}
+         */
+        OperationsState: "starting" | "running" | "healthy" | "degraded" | "stale" | "stalled";
         /** PageInfo */
         PageInfo: {
             /** Page */
@@ -300,6 +395,20 @@ export type components = {
             total_items: number;
             /** Total Pages */
             total_pages: number;
+        };
+        /** RuntimeBuild */
+        RuntimeBuild: {
+            /** Build Timestamp */
+            build_timestamp: string;
+            /** Git Commit */
+            git_commit: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Version */
+            version: string;
         };
         /**
          * ScrapeRunCompletion
@@ -629,6 +738,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScrapeStatus"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    live_health_live_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    operations_health_operations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationsHealth"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    ready_health_ready_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Service Unavailable */

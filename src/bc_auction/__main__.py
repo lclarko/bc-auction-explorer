@@ -557,7 +557,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 persisted_source_ids=[record.source_id for record in records],
             )
             run_finished = True
-        output = {
+        output: dict[str, object] = {
             "summary": {
                 "requested_limit": args.limit,
                 "results_only": args.results_only,
@@ -606,10 +606,19 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _open_repository(database_url: str | None) -> tuple[AuctionRepository, Engine]:
-    from bc_auction.database import create_postgres_engine, resolve_database_url
+    from bc_auction.database import (
+        DatabaseConfigurationError,
+        create_postgres_engine,
+        resolve_database_url,
+    )
     from bc_auction.persistence import AuctionRepository
 
-    resolved_url = resolve_database_url(database_url)
+    try:
+        resolved_url = resolve_database_url(database_url)
+    except DatabaseConfigurationError as exc:
+        raise ValueError(
+            "persistence requires --database-url or BC_AUCTION_DATABASE_URL"
+        ) from exc
     engine = create_postgres_engine(resolved_url)
     return AuctionRepository(engine), engine
 

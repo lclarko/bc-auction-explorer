@@ -94,6 +94,9 @@ def _finish(
     run_id: object,
     *,
     metrics: ScrapeRunMetrics | None = None,
+    coverage: ScrapeRunCoverage | None = None,
+    persisted_source_ids: tuple[str, ...] = (),
+    finished_at: datetime = datetime(2026, 7, 16, 1, tzinfo=UTC),
 ) -> None:
     repository.finish_scrape_run(
         run_id,
@@ -107,16 +110,9 @@ def _finish(
             item_failures=0,
         ),
         metrics=metrics,
-        coverage=ScrapeRunCoverage(
-            expected_product_groups=1,
-            processed_product_groups=1,
-            unique_listings_enumerated=3,
-            detail_attempted=3,
-            detail_succeeded=3,
-            persistence_succeeded=3,
-            enumeration_complete=True,
-        ),
-        finished_at=datetime(2026, 7, 16, 1, tzinfo=UTC),
+        coverage=coverage,
+        persisted_source_ids=persisted_source_ids,
+        finished_at=finished_at,
     )
 
 
@@ -144,7 +140,21 @@ def test_health_endpoints_report_database_and_operations_state(
         ),
         observed_at=_REQUEST_TIME,
     )
-    _finish(repository, run_id)
+    _finish(
+        repository,
+        run_id,
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=1,
+            unique_listings_enumerated=1,
+            detail_attempted=1,
+            detail_succeeded=1,
+            persistence_succeeded=1,
+            enumeration_complete=True,
+        ),
+        persisted_source_ids=("A000001",),
+        finished_at=_REQUEST_TIME,
+    )
 
     operations = client.get("/health/operations")
     assert operations.status_code == 200

@@ -26,6 +26,7 @@ from bc_auction.api_models import (
     OperationsRun,
     OperationsState,
     PageInfo,
+    RuntimeBuild,
     ScrapeRunSummary,
     ScrapeStatus,
 )
@@ -296,12 +297,12 @@ class AuctionReadRepository:
         )
         return OperationsHealth(
             state=state,
-            build={
-                "version": metadata.version,
-                "git_commit": metadata.git_commit,
-                "build_timestamp": metadata.build_timestamp,
-                "started_at": started_at,
-            },
+            build=RuntimeBuild(
+                version=metadata.version,
+                git_commit=metadata.git_commit,
+                build_timestamp=metadata.build_timestamp,
+                started_at=started_at,
+            ),
             configuration=OperationsConfiguration(
                 timezone=settings.timezone,
                 scrape_times=settings.scrape_times,

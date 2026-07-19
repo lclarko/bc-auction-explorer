@@ -76,11 +76,14 @@ def _run_scrape(stop_requested: Event, settings: OperationsSettings) -> int:
                 process.kill()
                 return process.wait()
     stdout, stderr = process.communicate()
-    _log_scrape_result(process.returncode, stdout, stderr)
+    completion_status = _log_scrape_result(process.returncode, stdout, stderr)
+    if process.returncode == 0 and completion_status != "complete":
+        _LOGGER.warning("scheduled_scrape_incomplete")
+        return 2
     return process.returncode
 
 
-def _log_scrape_result(return_code: int, stdout: str, stderr: str) -> None:
+def _log_scrape_result(return_code: int, stdout: str, stderr: str) -> str | None:
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError:
@@ -97,6 +100,7 @@ def _log_scrape_result(return_code: int, stdout: str, stderr: str) -> None:
     )
     if stderr.strip():
         _LOGGER.warning("scheduled_scrape_stderr_present")
+    return persistence.get("completion_status") if isinstance(persistence, dict) else None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
