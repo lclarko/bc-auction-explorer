@@ -150,6 +150,35 @@ def test_complete_runs_reconcile_absence_without_changing_source_status(
         persisted_source_ids=(present.source_id, missing.source_id, terminal.source_id),
     )
 
+    incomplete_run = _run(repository)
+    repository.persist_reconciled_record(
+        incomplete_run,
+        convert_reconciled_record(_detail(), observed_at=datetime(2026, 7, 15, 12, tzinfo=UTC)),
+    )
+    repository.finish_scrape_run(
+        incomplete_run,
+        status=ScrapeRunStatus.SUCCEEDED,
+        counts=ScrapeRunCounts(0, 1, 0, 0, 0, 0),
+        coverage=ScrapeRunCoverage(
+            expected_product_groups=1,
+            processed_product_groups=0,
+            unique_listings_enumerated=1,
+            detail_attempted=1,
+            detail_succeeded=1,
+            persistence_succeeded=1,
+            enumeration_complete=False,
+        ),
+        persisted_source_ids=(present.source_id,),
+    )
+    with repository._engine.connect() as connection:
+        incomplete_missing_row = connection.execute(
+            select(
+                auction_items.c.complete_absence_count,
+                auction_items.c.inventory_state,
+            ).where(auction_items.c.source_id == missing.source_id)
+        ).one()
+    assert incomplete_missing_row == (0, "current")
+
     for day in range(1, 4):
         run_id = _run(repository)
         repository.persist_reconciled_record(
