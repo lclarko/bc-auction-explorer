@@ -177,10 +177,35 @@ jobs:
             exit 1
           fi
           curl --connect-timeout 2 --fail --max-time 5 --silent http://127.0.0.1:8080/
-          test "$(docker compose -f compose.production.yaml exec -T api id -u)" = "10001"
-          test "$(docker compose -f compose.production.yaml exec -T proxy id -u)" = "10001"
-          test -z "$(docker compose -f compose.production.yaml exec -T proxy getcap /usr/bin/caddy)"
-          test "$(docker compose -f compose.production.yaml port postgres 5432 2>/dev/null || true)" = ""
+          pid_one_uid() {
+            docker compose -f compose.production.yaml exec -T "$1" \
+              sh -c "awk '/^Uid:/{print \$2}' /proc/1/status"
+          }
+          api_uid="$(pid_one_uid api)"
+          proxy_uid="$(pid_one_uid proxy)"
+          proxy_file_capabilities="$(docker compose -f compose.production.yaml exec -T proxy getcap /usr/bin/caddy)"
+          postgres_container="$(docker compose -f compose.production.yaml ps -q postgres)"
+          published_postgres_ports="$(
+            docker inspect \
+              --format '{{range $bindings := .NetworkSettings.Ports}}{{range $bindings}}{{println .HostPort}}{{end}}{{end}}' \
+              "$postgres_container"
+          )"
+          if [ "$api_uid" != "10001" ]; then
+            echo "api PID 1 is running as unexpected UID: $api_uid" >&2
+            exit 1
+          fi
+          if [ "$proxy_uid" != "10001" ]; then
+            echo "proxy PID 1 is running as unexpected UID: $proxy_uid" >&2
+            exit 1
+          fi
+          if [ -n "$proxy_file_capabilities" ]; then
+            echo "proxy binary retains unexpected file capabilities: $proxy_file_capabilities" >&2
+            exit 1
+          fi
+          if [ -n "$published_postgres_ports" ]; then
+            echo "postgres unexpectedly publishes host ports: $published_postgres_ports" >&2
+            exit 1
+          fi
           backup_dir="$RUNNER_TEMP/bc-auction-backups"
           mkdir -p "$backup_dir"
           scripts/backup-db.sh "$backup_dir"
