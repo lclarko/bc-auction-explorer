@@ -24,6 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import URL, Engine, make_url
+from sqlalchemy.exc import ArgumentError
 
 metadata = MetaData()
 
@@ -283,9 +284,12 @@ def create_postgres_engine(database_url: str) -> Engine:
 
 
 def _require_postgres_url(database_url: str) -> None:
-    url = make_url(database_url)
-    if url.get_backend_name() != "postgresql":
-        raise DatabaseConfigurationError("database URL must use PostgreSQL")
+    try:
+        url = make_url(database_url)
+    except ArgumentError as exc:
+        raise DatabaseConfigurationError("database URL was invalid") from exc
+    if url.get_backend_name() != "postgresql" or url.get_driver_name() != "psycopg":
+        raise DatabaseConfigurationError("database URL must use PostgreSQL psycopg")
 
 
 def utc_now() -> datetime:

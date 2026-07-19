@@ -13,8 +13,11 @@ if [ ! -d "$backup_directory" ]; then
 fi
 
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
-archive="$backup_directory/bc-auction-$timestamp.dump"
-temporary_archive="$archive.tmp"
+temporary_archive=$(mktemp "$backup_directory/.bc-auction-$timestamp.XXXXXX.tmp")
+temporary_name=$(basename "$temporary_archive")
+unique_suffix=${temporary_name#".bc-auction-$timestamp."}
+unique_suffix=${unique_suffix%.tmp}
+archive="$backup_directory/bc-auction-$timestamp-$unique_suffix.dump"
 compose="docker compose -f compose.production.yaml"
 
 if ! $compose exec -T postgres sh -ceu '

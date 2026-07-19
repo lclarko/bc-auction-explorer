@@ -77,13 +77,14 @@ def _detail(
     )
 
 
-def _run(repository: AuctionRepository) -> object:
+def _run(repository: AuctionRepository, *, mode: str = "detail") -> object:
     return repository.start_scrape_run(
         ScrapeRunInput(
             requested_limit=3,
             keyword="",
             sort="EndingFirst",
             parser_version="test-v1",
+            mode=mode,
         ),
         started_at=datetime(2026, 7, 16, tzinfo=UTC),
     )
@@ -127,7 +128,7 @@ def test_health_endpoints_report_database_and_operations_state(
     assert initial_operations.status_code == 200
     assert initial_operations.json()["state"] == "starting"
 
-    run_id = _run(repository)
+    run_id = _run(repository, mode="scheduled")
     _persist(
         repository,
         run_id,
@@ -160,6 +161,7 @@ def test_health_endpoints_report_database_and_operations_state(
     assert operations.status_code == 200
     assert operations.json()["state"] == "healthy"
     assert operations.json()["latest_complete_run"]["run_id"]
+    assert operations.json()["latest_scheduled_run"]["run_id"] == str(run_id)
 
 
 def _persist(
@@ -497,6 +499,8 @@ def test_listing_views_scope_current_observations_facets_and_availability(
         create_app(engine=repository._engine, now_provider=now_provider),
         raise_server_exceptions=False,
     ) as api_client:
+        assert calls == 1
+        calls = 0
         active = api_client.get("/api/listings", params={"page_size": 10})
         assert calls == 1
         ended = api_client.get("/api/listings", params={"view": "ended", "page_size": 10})

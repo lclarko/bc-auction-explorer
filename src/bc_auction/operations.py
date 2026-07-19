@@ -7,6 +7,7 @@ import logging
 import signal
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from threading import Event
@@ -65,22 +66,30 @@ def _run_scrape(stop_requested: Event, settings: OperationsSettings) -> int:
         "--limit",
         str(settings.scrape_limit),
     ]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    while process.poll() is None:
-        if stop_requested.wait(_POLL_SECONDS):
-            _LOGGER.info("scheduled_scrape_interrupted")
-            process.terminate()
-            try:
-                return process.wait(timeout=60)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                return process.wait()
-    stdout, stderr = process.communicate()
-    completion_status = _log_scrape_result(process.returncode, stdout, stderr)
-    if process.returncode == 0 and completion_status != "complete":
+    with (
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stdout_file,
+        tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file,
+    ):
+        process = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
+        while process.poll() is None:
+            if stop_requested.wait(_POLL_SECONDS):
+                _LOGGER.info("scheduled_scrape_interrupted")
+                process.terminate()
+                try:
+                    process.wait(timeout=60)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                break
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout, stderr = stdout_file.read(), stderr_file.read()
+    return_code = process.returncode
+    completion_status = _log_scrape_result(return_code, stdout, stderr)
+    if return_code == 0 and completion_status != "complete":
         _LOGGER.warning("scheduled_scrape_incomplete")
         return 2
-    return process.returncode
+    return return_code
 
 
 def _log_scrape_result(return_code: int, stdout: str, stderr: str) -> str | None:

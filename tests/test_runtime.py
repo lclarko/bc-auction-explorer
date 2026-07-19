@@ -35,6 +35,14 @@ def test_resolve_database_url_rejects_incomplete_secret_file_settings() -> None:
         resolve_database_url(environ={"BC_AUCTION_DATABASE_HOST": "postgres"})
 
 
+@pytest.mark.parametrize("database_url", ("postgresql://localhost/bc_auction", "://bad"))
+def test_resolve_database_url_rejects_non_psycopg_or_invalid_direct_urls(
+    database_url: str,
+) -> None:
+    with pytest.raises(DatabaseConfigurationError):
+        resolve_database_url(database_url)
+
+
 def test_operations_settings_validate_schedule_and_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BC_AUCTION_SCRAPE_TIMES", "18:00,06:00,12:00")
     monkeypatch.setenv("BC_AUCTION_SCRAPE_LIMIT", "1000")

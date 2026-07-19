@@ -41,8 +41,17 @@ if ! $compose run --rm migrate; then
     exit 5
 fi
 
+# shellcheck disable=SC2086
 $compose up -d $restore_services
-if ! $compose exec -T api python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready').read()"; then
+ready=false
+for attempt in $(seq 1 30); do
+    if $compose exec -T api python -c "from urllib.request import urlopen; urlopen('http://127.0.0.1:8000/health/ready', timeout=5).read()"; then
+        ready=true
+        break
+    fi
+    sleep 2
+done
+if [ "$ready" != true ]; then
     echo '{"event":"restore_failed","reason":"readiness_failed"}' >&2
     exit 5
 fi

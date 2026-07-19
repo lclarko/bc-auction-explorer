@@ -577,6 +577,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
         _write_output(args.output, output)
     except (OSError, ScraperError, httpx.HTTPError, ValueError, _ScrapeInterrupted) as exc:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if progress is not None:
             progress.close()
         _report_failed_run_finalization(
@@ -585,6 +586,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"scrape failed: {_redact_session_id(str(exc))}", file=sys.stderr)
         return 1
     except Exception as exc:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
         if progress is not None:
             progress.close()
         _report_failed_run_finalization(

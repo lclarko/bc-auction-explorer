@@ -70,7 +70,7 @@ def create_app(
                 )
             repository = AuctionReadRepository(resolved_engine)
             app.state.read_repository = repository
-            app.state.started_at = _utc_now()
+            app.state.started_at = _provided_utc_now(now_provider)
             app.state.runtime_metadata = runtime_metadata
             app.state.operations_settings = operations_settings
             _LOGGER.info("api_started")

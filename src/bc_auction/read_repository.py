@@ -257,6 +257,7 @@ class AuctionReadRepository:
         complete_runs = (
             select(*run_columns)
             .where(
+                scrape_runs.c.mode == "scheduled",
                 scrape_runs.c.status == "succeeded",
                 scrape_runs.c.completion_status == "complete",
             )
@@ -271,6 +272,7 @@ class AuctionReadRepository:
             latest_complete = connection.execute(complete_runs.limit(1)).mappings().one_or_none()
             failures_statement = select(func.count()).select_from(scrape_runs).where(
                 scrape_runs.c.mode == "scheduled",
+                scrape_runs.c.status != "running",
                 or_(
                     scrape_runs.c.status != "succeeded",
                     scrape_runs.c.completion_status != "complete",

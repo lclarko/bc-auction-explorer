@@ -5,10 +5,11 @@ read_secret() {
     tr -d '\r\n' < "/run/secrets/$1"
 }
 
-export PGPASSWORD="$(read_secret postgres_admin_password)"
-export BC_AUCTION_MIGRATION_PASSWORD="$(read_secret migration_password)"
-export BC_AUCTION_SCRAPER_PASSWORD="$(read_secret scraper_password)"
-export BC_AUCTION_API_PASSWORD="$(read_secret api_password)"
+PGPASSWORD="$(read_secret postgres_admin_password)"
+BC_AUCTION_MIGRATION_PASSWORD="$(read_secret migration_password)"
+BC_AUCTION_SCRAPER_PASSWORD="$(read_secret scraper_password)"
+BC_AUCTION_API_PASSWORD="$(read_secret api_password)"
+export PGPASSWORD BC_AUCTION_MIGRATION_PASSWORD BC_AUCTION_SCRAPER_PASSWORD BC_AUCTION_API_PASSWORD
 
 psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set ON_ERROR_STOP=1 \
     --set database_name="$POSTGRES_DB" \

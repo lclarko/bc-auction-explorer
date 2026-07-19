@@ -35,4 +35,6 @@ FROM runtime AS operations
 CMD ["python", "-m", "bc_auction.operations"]
 
 FROM runtime AS migrate
+COPY --chown=bcauction:bcauction alembic.ini ./
+COPY --chown=bcauction:bcauction alembic ./alembic
 CMD ["alembic", "upgrade", "head"]
